@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Leads → Zillow + Owners (Drop HTML • Side Drawer • Progress)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --purple:#7e3ff2; --orange:#ff6a3d; --ink:#1f2937; --muted:#6b7280;
+    --card:#ffffff; --border:#e5e7eb; --accent:#7e3ff2; --accent-hover:#6a2fe0;
+    --bg:#ffffff;
+  }
+  html,body{height:100%;overflow-x:auto}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:12px/1.35 Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;min-width:1400px}
+  header{width:100%;padding:14px 0;background:linear-gradient(90deg,var(--purple),var(--orange));
+    color:#fff;position:sticky;top:0;z-index:20;min-width:1400px}
+  header .inner{max-width:none;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
+  header h1{margin:0;font-size:16px;font-weight:700;letter-spacing:0.02em}
+  header p{margin:0;font-size:11px;opacity:0.9}
+  main{max-width:none;margin:0 auto;padding:12px 16px 32px;display:flex;gap:14px;position:relative;min-width:1400px}
+  .col{flex:1 1 0;min-width:600px;transition:none}
+  .card{background:var(--card);border-radius:10px;border:1px solid var(--border);padding:12px 12px 10px;
+    box-shadow:0 8px 24px rgba(15,23,42,0.06)}
+  .card h2{margin:0 0 6px;font-size:13px}
+  .card p{margin:0 0 6px;font-size:11px;color:var(--muted)}
+  .panel{margin-bottom:10px}
+  label{display:block;font-size:11px;font-weight:600;margin-bottom:4px}
+  input,textarea,select{width:100%;box-sizing:border-box;font:inherit;border-radius:6px;border:1px solid var(--border);
+    padding:5px 7px;outline:none}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 1px rgba(126,63,242,0.2)}
+  textarea{min-height:160px; resize:vertical}
+  #inputArea{min-height:auto;height:32px;padding:4px 7px;resize:none}
+  .choices{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{display:inline-block; background:#eef2ff; border:1px solid #c7d2fe; color:#1e3a8a; padding:3px 7px; border-radius:999px; font-size:11px}
+  .chip.badge{background:#ecfdf5;border-color:#6ee7b7;color:#166534;display:inline-block;padding:4px 8px}
+  .chip.badge .word-wrapper{display:inline-block;margin-right:6px}
+  .btn{border-radius:999px; border:1px solid var(--border); padding:4px 9px; font-size:11px; font-weight:600;
+    background:#fff; cursor:pointer; display:inline-flex; align-items:center; gap:6px}
+  .btn-primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .btn-primary:hover{background:var(--accent-hover)}
+  .btn:disabled{opacity:0.5;cursor:default}
+  .row{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+  .small{font-size:11px}
+  .status{color:var(--muted)}
+  .progress{height:4px;border-radius:999px;background:#f3f4f6;margin-top:8px;overflow:hidden}
+  .bar{height:100%;width:0;background:linear-gradient(90deg,var(--purple),var(--orange));transition:width 0.25s ease-out}
+  .divider{height:1px;background:#e5e7eb;margin:10px 0}
+  table{width:100%;border-collapse:collapse;font-size:12px;table-layout:auto}
+  th,td{padding:6px 4px;border-bottom:1px solid var(--border);vertical-align:middle}
+  #leadBody td{white-space:nowrap}
+  #resultsBody td:first-child{white-space:nowrap;min-width:400px}
+  #resultsBody td:last-child{white-space:nowrap;min-width:300px}
+  tbody tr:last-child td{border-bottom:none}
+  .addr{font-weight:700;display:inline-block}
+  .addr .word-wrapper{display:inline-block;margin-right:4px;vertical-align:top}
+  #leadBody .addr{white-space:nowrap}
+  #leadBody .addr .word-wrapper{white-space:normal}
+  .actions{display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid var(--border); border-radius:999px;
+    background:#fff; color:#111; text-decoration:none; font-weight:700}
+  .pill:hover{background:#f5f5f5}
+  img.icon{height:14px; width:14px; vertical-align:-3px}
+
+  /* Done pill */
+  .pill.done{background:#dcfce7; border-color:#22c55e; color:#166534;}
+  .pill.complete{background:#22c55e; border-color:#22c55e; color:#fff;}
+  .btn.searching{background:#f59e0b; border-color:#f59e0b; color:#fff;cursor:not-allowed}
+  tr.state-excluded{background-color:#ff6b6b;} /* Red = unworkable */
+  tr.checked{background-color:#90ee90;} /* Green = done/checked */
+  tr.search-done{background-color:#ffe4b5;} /* Light orange = search done, waiting to be processed */
+  /* If both search-done and checked, checked takes precedence */
+  tr.checked.search-done{background-color:#90ee90;}
+  /* If both state-excluded and checked, state-excluded takes precedence */
+  tr.state-excluded.checked{background-color:#ff6b6b;}
+
+  /* Drawer */
+  .drawer{position:fixed; top:56px; right:0; width:900px; height:calc(100vh - 56px); background:#f9fafb;
+    border-left:1px solid var(--border); box-shadow:-8px 0 24px rgba(15,23,42,0.12); display:flex; flex-direction:column;
+    transform:translateX(100%); transition:transform 0.23s ease-out; z-index:30;flex-shrink:0}
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;
+    background:#fff}
+  .drawer-head span{font-size:12px;font-weight:600}
+  .drawer-body{padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+  #resultsWrap{flex:1 1 auto;overflow:auto;border-radius:8px;border:1px solid var(--border);background:#fff;padding:6px;min-height:0}
+  #drop{border-radius:10px;border:1px dashed #d1d5db;padding:12px;text-align:center;font-size:11px;color:#6b7280;
+    cursor:pointer;background:#f9fafb}
+  #drop.drag{background:#eef2ff;border-color:#a5b4fc;color:#1e3a8a}
+  #fileInput{display:none}
+  .error{color:#dc2626}
+  .finder{display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; border:1px solid var(--border);
+    cursor:pointer; font-weight:700; background:#fff}
+  .finder:hover{background:#f5f5f5}
+  .muted{color:#6b7280}
+  .word-length{font-size:9px;color:var(--muted);display:block;line-height:1.2}
+  .word-wrapper{display:inline-block;margin-right:8px;vertical-align:top;white-space:normal}
+  .highlight{background-color:#fef3c7;color:#92400e;font-weight:600;padding:0 2px;border-radius:2px}
+</style>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <div>
+      <h1>Leads → Zillow + Owners</h1>
+      <p>Drop MotivatedSellers inventory HTML → Click “Search owner” → Auto Serper + BatchData owners</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="col">
+    <div class="card panel">
+      <h2>1) Drop MotivatedSellers Inventory HTML</h2>
+      <p>Go to MotivatedSellers → Leads → Inventory → drop the HTML of that page here.</p>
+      <div id="drop" class="drop">
+        <strong>Drop HTML here</strong><br />
+        <span class="small">…or click to choose an HTML file</span>
+      </div>
+      <input type="file" id="fileInput" accept=".html,.htm" />
+      <div class="small muted" id="ingestStatus">No file loaded.</div>
+    </div>
+
+    <div class="card panel">
+      <h2>2) Leads from inventory</h2>
+      <p>Parsed from MotivatedSellers inventory (one row per lead). Click "Search owner" to open the right drawer.</p>
+
+      <div style="overflow-x:auto;overflow-y:visible">
+        <table>
+          <thead>
+            <tr>
+              <th style="min-width:50px; text-align:center">#</th>
+              <th style="min-width:180px; text-align:left">Actions</th>
+              <th style="min-width:120px">Seller</th>
+              <th style="min-width:100px">Phone</th>
+              <th style="min-width:150px">Email</th>
+              <th style="min-width:180px">Address</th>
+              <th style="min-width:140px">City / State / Zip</th>
+            </tr>
+          </thead>
+          <tbody id="leadBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right drawer -->
+  <div id="drawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <span id="drawerTitle">Search &amp; Owners</span>
+      <button id="closeDrawer" class="btn">Close</button>
+    </div>
+    <div class="drawer-body">
+      <div id="leadDetails" style="display:none;padding:8px;background:#fff;border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px">
+          <div><strong>Seller:</strong> <span id="drawerSeller"></span></div>
+          <div><strong>Phone:</strong> <span id="drawerPhone"></span></div>
+          <div><strong>Email:</strong> <span id="drawerEmail"></span></div>
+          <div><strong>Address:</strong> <span id="drawerAddress"></span></div>
+          <div><strong>City/State/Zip:</strong> <span id="drawerCityStateZip"></span></div>
+        </div>
+      </div>
+      <div>
+        <label>Input block (auto-filled)</label>
+        <textarea id="inputArea"></textarea>
+      </div>
+
+      <div class="row">
+        <div style="flex:1 1 120px">
+          <label>Search depth</label>
+          <div id="drawerNumChoices" class="choices"></div>
+        </div>
+        <div style="flex:1 1 120px">
+          <label>Auto owner lookups (top N)</label>
+          <input id="drawerAutoOwners" value="20" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="runBtn" class="btn btn-primary">Run Search</button>
+        <span id="status" class="small status">Ready</span>
+      </div>
+
+      <div class="progress"><div id="bar" class="bar"></div></div>
+
+      <div class="divider"></div>
+
+      <div id="resultsWrap" style="overflow-x:auto;overflow-y:auto;height:calc(100vh - 400px);min-height:500px;max-height:calc(100vh - 400px);padding-bottom:20px">
+        <table style="width:100%; border-collapse:collapse; font-size:12px;table-layout:auto">
+          <thead>
+            <tr>
+              <th style="min-width:400px">Address</th>
+              <th style="min-width:300px; text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/** API keys are NOT stored in the browser anymore.
+ *  Requests go through serverless proxies (/api/serper and /api/batchdata)
+ *  which add the keys from Vercel environment variables, server-side. **/
+
+/** Pending % / market data (bundled static JSON, served from /data) **/
+const PENDING_DATA_BASE = "/data";
+const stateDataCache = new Map(); // STATE -> { latestMonth, byZip: Map<zip, row> } | "error"
+const stateDataInflight = new Map(); // STATE -> Promise
+
+async function loadStateZipData(state){
+  const key = (state||"").toUpperCase();
+  if(!key) return null;
+  if(stateDataCache.has(key)){
+    const v = stateDataCache.get(key);
+    return v === "error" ? null : v;
+  }
+  if(stateDataInflight.has(key)) return stateDataInflight.get(key);
+  const p = (async ()=>{
+    try{
+      const res = await fetch(`${PENDING_DATA_BASE}/zips/${key}.json`);
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      const months = Object.keys(data).sort();
+      const latestMonth = months[months.length-1];
+      const byZip = new Map();
+      (data[latestMonth]||[]).forEach(row=>{
+        const z = String(row.zip).padStart(5,"0");
+        byZip.set(z, row);
+      });
+      const obj = { latestMonth, byZip };
+      stateDataCache.set(key, obj);
+      return obj;
+    }catch(e){
+      console.warn(`Failed to load pending data for ${key}:`, e.message);
+      stateDataCache.set(key, "error");
+      return null;
+    }finally{
+      stateDataInflight.delete(key);
+    }
+  })();
+  stateDataInflight.set(key, p);
+  return p;
+}
+
+async function getZipMetrics(zip, state){
+  const data = await loadStateZipData(state);
+  if(!data) return null;
+  const z = String(zip||"").padStart(5,"0");
+  return data.byZip.get(z) || null;
+}
+
+function fmtPct(v){ return v==null ? "—" : (v*100).toFixed(1)+"%"; }
+function fmtMoney(v){
+  if(v==null) return "—";
+  if(v >= 1_000_000) return "$"+(v/1_000_000).toFixed(2)+"M";
+  if(v >= 1_000) return "$"+Math.round(v/1_000)+"K";
+  return "$"+v;
+}
+function fmtInt(v){ return v==null ? "—" : String(v); }
+
+/** DOM helpers **/
+function $(sel){return document.querySelector(sel);}
+function el(tag, attrs={}, ...children){
+  const node=document.createElement(tag);
+  for(const [k,v] of Object.entries(attrs||{})){
+    if(k==="class") node.className=v;
+    else if(k==="text") node.textContent=v;
+    else node.setAttribute(k,v);
+  }
+  for(const c of children){
+    if(c==null) continue;
+    if(typeof c==="string") node.appendChild(document.createTextNode(c));
+    else node.appendChild(c);
+  }
+  return node;
+}
+function choiceBar(container, current, onChange){
+  container.innerHTML="";
+  [10,20,50,100].forEach(n=>{
+    const chip=el("button",{class:"btn small"+(n===current?" btn-primary":""),type:"button"}, String(n));
+    chip.addEventListener("click",()=>{
+      onChange(n);
+      choiceBar(container,n,onChange);
+    });
+    container.appendChild(chip);
+  });
+}
+
+/** Serper **/
+async function serperSearchMany(query, num){
+  // Serper returns max 10 results per page, so we need pagination to get more
+  const resultsPerPage = 10;
+  const totalPages = Math.ceil(num / resultsPerPage);
+  const allResults = [];
+  
+  for(let page = 1; page <= totalPages && allResults.length < num; page++){
+    const payload={q:query, num:resultsPerPage, gl:"us", hl:"en", type:"search", page};
+  const res=await fetch("/api/serper",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload)
+  });
+  if(!res.ok) throw new Error("Serper error "+res.status);
+  const data=await res.json();
+    const pageResults = data.organic||[];
+    allResults.push(...pageResults);
+    
+    // If we got fewer results than requested, we've reached the end
+    if(pageResults.length < resultsPerPage) break;
+    
+    // Small delay between pages to avoid rate limiting
+    if(page < totalPages) await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  // Return up to the requested number
+  return allResults.slice(0, num);
+}
+
+/** BatchData using working endpoint **/
+async function batchdataOwners(addr){
+  const payload={requests:[{address:addr}]};
+  const res=await fetch("/api/batchdata",{
+    method:"POST",
+    headers:{
+      "Accept":"application/json",
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify(payload)
+  });
+  if(!res.ok){ throw new Error("BatchData "+res.status+": "+await res.text()); }
+  const data=await res.json();
+  try{
+    const props=(data.results && data.results.properties)||[];
+    if(!props.length) return [];
+    const owner=props[0].owner||{};
+    let owners=[];
+    if(Array.isArray(owner.names)) owners=owner.names.map(n=>n.full).filter(Boolean);
+    if(!owners.length && typeof owner.fullName==="string"){
+      owners=owner.fullName.split(";").map(s=>s.trim()).filter(Boolean);
+    }
+    return owners;
+  }catch{return [];}
+}
+
+/** Address helpers **/
+function parseInputBlock(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length===1 && lines[0].includes('\t')){
+    const [address,city,state,zipcode]=lines[0].split('\t');
+    return {address,city,state,zipcode};
+  }
+  const data={};
+  for(let i=0;i<lines.length;i+=2){
+    const k=lines[i].toLowerCase();
+    data[k]=lines[i+1]||"";
+  }
+  return {address:data.address||"", city:data.city||"", state:data.state||"", zipcode:data.zipcode||""};
+}
+function getNumberRange(base){
+  const prefix=(base.match(/^\d+/)||[""])[0];
+  const stars=(base.match(/\*/g)||[]).length;
+  if(!prefix && stars===0) return [];
+  if(stars===0) return [prefix];
+  const start=parseInt(prefix+"0".repeat(stars),10);
+  const end=parseInt(prefix+"9".repeat(stars),10);
+  const out=[];
+  for(let n=start;n<=end;n++) out.push(String(n));
+  return out;
+}
+function getStreetNameLengths(mask){
+  return mask.split(/\s+/).filter(w=>/\*/.test(w)).map(w=>w.length);
+}
+function cleanTitleToZip(title, zip){
+  const i=title.indexOf(zip); if(i===-1) return null;
+  return title.slice(0,i+zip.length).replace(" | Zillow","").trim();
+}
+function relevanceKey(title, targetLens){
+  const first=(title.split(",")[0]||"").trim();
+  const parts=first.split(/\s+/).slice(1);
+  const lens=parts.map(w=>w.length);
+  const diffs=[];
+  for(let i=0;i<Math.max(lens.length,targetLens.length);i++){
+    const a=lens[i]??0, b=targetLens[i]??0;
+    diffs.push(Math.abs(a-b));
+  }
+  return diffs;
+}
+function parseTitleComponents(title){
+  const m=title.match(/^(\d+)\s+([^,]+),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})/);
+  if(!m) return null;
+  return {number:m[1], street:m[2], city:m[3], state:m[4], zipcode:m[5]};
+}
+
+/** Drawer state **/
+const drawer=$("#drawer"), drawerTitle=$("#drawerTitle"), closeDrawer=$("#closeDrawer");
+const inputArea=$("#inputArea"), statusEl=$("#status"), resultsBody=$("#resultsBody");
+const drawerNumChoices=$("#drawerNumChoices"), bar=$("#bar");
+const drawerAutoOwners=$("#drawerAutoOwners");
+const leadMeta = new Map();
+const searchResults = new Map(); // Store results per leadKey: { items, status, progress, sellerPrefixes }
+let drawerLeadKey = null;
+let drawerSelectedNum=50;
+
+choiceBar(drawerNumChoices, drawerSelectedNum, n=>{
+  drawerSelectedNum = n;
+  // Also update the per-lead value if a lead is selected
+  if(drawerLeadKey && leadMeta.has(drawerLeadKey)) {
+    const meta = leadMeta.get(drawerLeadKey);
+    if(meta) meta.selectedNum = n;
+  }
+});
+
+closeDrawer.addEventListener("click", ()=> {
+  drawer.classList.remove("open");
+});
+document.getElementById("runBtn").addEventListener("click", ()=>{
+  if(drawerLeadKey) {
+    runSearch(drawerLeadKey).catch(console.error);
+  } else {
+    runSearch().catch(console.error);
+  }
+});
+
+
+async function runSearch(leadKeyForSearch = null){
+  const currentLeadKey = leadKeyForSearch || drawerLeadKey;
+  if(!currentLeadKey) {
+    if(drawerLeadKey) {
+      statusEl.textContent="No lead selected.";
+    }
+    return;
+  }
+  
+  // Get per-lead settings - always get fresh values
+  const leadMetaData = leadMeta.get(currentLeadKey);
+  // Get the current selectedNum from meta, or calculate it if not set
+  let leadSelectedNum;
+  if(leadMetaData && leadMetaData.selectedNum !== undefined) {
+    leadSelectedNum = leadMetaData.selectedNum;
+  } else {
+    // Calculate default based on address
+    const addrMask = inputArea.value.split('\t')[0] || "";
+    leadSelectedNum = autoPickNum(addrMask);
+    // Store it in meta for future use
+    if(leadMetaData) {
+      leadMetaData.selectedNum = leadSelectedNum;
+    }
+  }
+  const leadOwners = leadMetaData && leadMetaData.ownersInput ? leadMetaData.ownersInput.value : "20";
+  
+  // Initialize or get search state for this lead
+  if(!searchResults.has(currentLeadKey)) {
+    searchResults.set(currentLeadKey, { items: [], status: "Starting…", progress: 0, sellerPrefixes: [] });
+  }
+  const searchState = searchResults.get(currentLeadKey);
+  searchState.status = "Starting…";
+  searchState.progress = 0;
+  
+  // Update UI if this is the currently displayed lead
+  if(currentLeadKey === drawerLeadKey) {
+  statusEl.textContent="Starting…";
+  resultsBody.innerHTML="";
+  bar.style.width="0%";
+    drawerSelectedNum = leadSelectedNum;
+    drawerAutoOwners.value = leadOwners;
+    choiceBar(drawerNumChoices, drawerSelectedNum, n=>drawerSelectedNum=n);
+  }
+
+  const parsed=parseInputBlock(inputArea.value.trim());
+  const addrMask=(parsed.address||"").trim();
+  const city=(parsed.city||"").trim();
+  const state=(parsed.state||"").trim();
+  const zipcode=(parsed.zipcode||"").trim();
+  if(!addrMask||!city||!state||!zipcode){
+    searchState.status = "Missing address mask, city, state, or zipcode.";
+    if(currentLeadKey === drawerLeadKey) {
+      statusEl.textContent = searchState.status;
+    }
+    return;
+  }
+
+  const [numMask,...streetMaskParts]=addrMask.split(/\s+/);
+  const numberRange=getNumberRange(numMask);
+  const targetLens=getStreetNameLengths(streetMaskParts.join(" "));
+  const map=new Map();
+
+  searchState.status = `Searching ${numberRange.length} number(s)…`;
+  if(currentLeadKey === drawerLeadKey && drawer.classList.contains("open")) {
+    statusEl.textContent = searchState.status;
+  }
+  
+  for(const number of numberRange){
+    const q=`${number} ${city} ${state} ${zipcode} site:zillow.com`;
+    try{
+      // Always use the per-lead selectedNum (it's already set above)
+      // Fallback to drawerSelectedNum only if leadSelectedNum is somehow invalid
+      const numToUse = Number(leadSelectedNum) || Number(drawerSelectedNum) || 50;
+      const organic=await serperSearchMany(q, numToUse);
+      organic.forEach(item=>{
+        const link=item.link||""; const t=item.title||"";
+        if(!link.includes("zillow.com")||!link.includes("/homedetails/")) return;
+        const cleaned=cleanTitleToZip(t, zipcode); if(!cleaned) return;
+        if(!cleaned.startsWith(number)) return;
+        if(!map.has(cleaned)) map.set(cleaned, link);
+      });
+    }catch(e){
+      console.warn("Search error:", e);
+      searchState.status = `Search error for "${q}". See console.`;
+      if(currentLeadKey === drawerLeadKey && drawer.classList.contains("open")) {
+        statusEl.textContent = searchState.status;
+      }
+    }
+  }
+
+  const items=Array.from(map.entries());
+  items.sort((a,b)=>{
+    const ka=relevanceKey(a[0], targetLens);
+    const kb=relevanceKey(b[0], targetLens);
+    for(let i=0;i<Math.max(ka.length,kb.length);i++){
+      const da=ka[i]??100, db=kb[i]??100;
+      if(da!==db) return da-db;
+    }
+    return a[0].localeCompare(b[0]);
+  });
+
+  // Use per-lead owners value
+  const topN = Math.max(0, parseInt(leadOwners || (drawerAutoOwners.value||"20"),10));
+  
+  // Get seller prefixes for highlighting
+  let sellerPrefixes = [];
+  if (currentLeadKey && leadMetaData && leadMetaData.seller) {
+    sellerPrefixes = extractSellerPrefixes(leadMetaData.seller);
+  }
+  
+  // Store results immediately
+  searchState.sellerPrefixes = sellerPrefixes;
+  searchState.items = items;
+  searchState.topN = topN;
+  searchState.status = `Found ${items.length} result(s).`;
+  
+  // Render results if this is the currently displayed lead
+  if(currentLeadKey === drawerLeadKey && drawer.classList.contains("open")) {
+    loadSearchResults(currentLeadKey);
+  }
+  
+  // Fetch owners in background (non-blocking) - don't await, runs concurrently
+  fetchOwnersForResults(currentLeadKey, items, topN, sellerPrefixes).catch(console.error);
+  
+  // Update button state and row color
+  if (currentLeadKey && leadMeta.has(currentLeadKey)) {
+    const meta = leadMeta.get(currentLeadKey);
+    if (meta && meta.searchBtn) {
+      meta.searchBtn.classList.add("complete");
+      meta.searchBtn.textContent = "Results ✓";
+      
+      // Add search-done class to the row (light orange background)
+      if (meta.row) {
+        meta.row.classList.add("search-done");
+      }
+    }
+  }
+}
+
+function loadSearchResults(leadKey) {
+  const searchState = searchResults.get(leadKey);
+  if(!searchState || !searchState.items) {
+    resultsBody.innerHTML = "";
+    statusEl.textContent = "No results yet.";
+    bar.style.width = "0%";
+    return;
+  }
+  
+  const { items, sellerPrefixes, topN, status } = searchState;
+  resultsBody.innerHTML = "";
+  statusEl.textContent = status || `Found ${items.length} result(s).`;
+  
+  items.forEach(([address,link], idx)=>{
+    const tr=el("tr");
+    const tdA=el("td");
+    const addrContainer = el("div", {class:"addr"});
+    const comps = parseTitleComponents(address);
+    if(comps) {
+      addrContainer.appendChild(el("span", {text: `${comps.number} `}));
+      addrContainer.appendChild(renderStreetWordsWithLength(address));
+      addrContainer.appendChild(el("span", {text: `, ${comps.city}, ${comps.state} ${comps.zipcode}`}));
+    } else {
+      addrContainer.appendChild(el("span", {text: address}));
+    }
+    tdA.appendChild(addrContainer);
+    const tdB=el("td");
+    const actions=el("div",{class:"actions"});
+    
+    // Copy button
+    const copyBtn=el("button",{class:"btn", text:"Copy"});
+    copyBtn.addEventListener("click", ()=>{
+      navigator.clipboard.writeText(address).then(()=>{
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = "Copied!";
+        copyBtn.disabled = true;
+        setTimeout(()=>{
+          copyBtn.textContent = originalText;
+          copyBtn.disabled = false;
+        }, 1000);
+      }).catch(err=>{
+        console.error("Failed to copy:", err);
+        copyBtn.textContent = "Error";
+        setTimeout(()=>{ copyBtn.textContent = "Copy"; }, 1000);
+      });
+    });
+    actions.appendChild(copyBtn);
+    actions.appendChild(zillowButton(link));
+    
+    // Check if owners are already loaded for this address
+    const ownerData = searchState.owners && searchState.owners.get(address);
+    if(ownerData) {
+      const ownerContainer = el("div", {class:"owners-inline"});
+      ownerData.forEach(owner => {
+        const ownerChip = el("span", {class:"chip badge"});
+        ownerChip.appendChild(renderOwnerWithLength(owner, sellerPrefixes || []));
+        ownerContainer.appendChild(ownerChip);
+      });
+      actions.appendChild(ownerContainer);
+    } else {
+      // Always show "Find owner" button for each row
+    const findBtn=el("button",{class:"finder", text:"Find owner"});
+      findBtn.addEventListener("click", async ()=>{ 
+        await replaceWithOwners(actions, findBtn, address, sellerPrefixes || [], leadKey);
+      });
+    actions.appendChild(findBtn);
+    }
+    
+    tdB.appendChild(actions);
+    tr.appendChild(tdA); tr.appendChild(tdB);
+    resultsBody.appendChild(tr);
+  });
+  
+  if(searchState.progress > 0) {
+    bar.style.width = searchState.progress + "%";
+  }
+}
+
+async function fetchOwnersForResults(leadKey, items, topN, sellerPrefixes) {
+  const searchState = searchResults.get(leadKey);
+  if(!searchState) return;
+  
+  if(!searchState.owners) {
+    searchState.owners = new Map();
+  }
+  
+  // Track how many owners have been fetched (default to 0, or use existing value)
+  const startIdx = searchState.ownersFetched || 0;
+  const endIdx = Math.min(startIdx + topN, items.length);
+  
+  // If we've already fetched all owners, don't do anything
+  if(startIdx >= items.length) {
+    if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
+      fetchMoreOwnersBtn.style.display = "none";
+    }
+    return;
+  }
+  
+  searchState.status = `Fetching owners for ${startIdx + 1}-${endIdx} of ${items.length}…`;
+  if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
+    statusEl.textContent = searchState.status;
+  }
+  
+  for(let i=startIdx; i<endIdx; i++){
+    const [address] = items[i];
+    const comps = parseTitleComponents(address);
+    if(!comps) continue;
+    
+    const addrObj = {
+      street: `${comps.number} ${comps.street}`,
+      city: comps.city,
+      state: comps.state,
+      zip: comps.zipcode
+    };
+    
+    try {
+      const owners = await batchdataOwners(addrObj);
+      searchState.owners.set(address, owners);
+      
+      // Update UI if this is the currently displayed lead AND drawer is open
+      if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
+        const pct = Math.round(((i+1)/items.length)*100);
+        searchState.progress = pct;
+        bar.style.width = pct + "%";
+        statusEl.textContent = `Owners: ${i+1}/${items.length} loaded…`;
+        
+        // Update the specific row if it's visible
+        const rows = resultsBody.querySelectorAll("tr");
+        if(rows[i]) {
+          const actionsDiv = rows[i].querySelector(".actions");
+          if(actionsDiv) {
+            const findBtn = actionsDiv.querySelector(".finder");
+            if(findBtn) {
+              const ownerContainer = el("div", {class:"owners-inline"});
+              owners.forEach(owner => {
+                const ownerChip = el("span", {class:"chip badge"});
+                ownerChip.appendChild(renderOwnerWithLength(owner, sellerPrefixes || []));
+                ownerContainer.appendChild(ownerChip);
+              });
+              actionsDiv.replaceChild(ownerContainer, findBtn);
+            }
+          }
+        }
+      }
+    } catch(e) {
+      console.error("BatchData owner lookup error:", e);
+    }
+  }
+  
+  // Update ownersFetched count
+  searchState.ownersFetched = endIdx;
+  
+  if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
+    if(endIdx >= items.length) {
+      searchState.status = `Done. All ${items.length} owners loaded.`;
+      statusEl.textContent = searchState.status;
+      bar.style.width = "100%";
+    } else {
+      searchState.status = `Loaded ${endIdx} of ${items.length} owners.`;
+      statusEl.textContent = searchState.status;
+      const pct = Math.round((endIdx/items.length)*100);
+      bar.style.width = pct + "%";
+    }
+    // Reload results to show owners and "Find owner" buttons for remaining rows
+    loadSearchResults(leadKey);
+  }
+}
+
+async function replaceWithOwners(actionsContainer, buttonEl, address, sellerPrefixes=[], leadKey=null){
+  const comps=parseTitleComponents(address);
+  if(!comps){
+    const err=el("span",{class:"error", text:"Could not parse address"});
+    actionsContainer.replaceChild(err, buttonEl);
+    return;
+  }
+  const addrObj={
+    street: `${comps.number} ${comps.street}`,
+    city: comps.city,
+    state: comps.state,
+    zip: comps.zipcode
+  };
+
+  buttonEl.disabled=true;
+  buttonEl.textContent="Fetching…";
+
+  try{
+    const owners=await batchdataOwners(addrObj);
+    
+    // Store owners in searchState if leadKey provided
+    if(leadKey && searchResults.has(leadKey)) {
+      const searchState = searchResults.get(leadKey);
+      if(!searchState.owners) searchState.owners = new Map();
+      searchState.owners.set(address, owners);
+    }
+    
+    let view;
+    if(owners.length){
+      const ownerContainer = el("div", {class:"owners-inline"});
+      owners.forEach(owner => {
+        const ownerChip = el("span", {class:"chip badge"});
+        ownerChip.appendChild(renderOwnerWithLength(owner, sellerPrefixes));
+        ownerContainer.appendChild(ownerChip);
+      });
+      view = ownerContainer;
+    }else{
+      view=el("span",{class:"muted", text:"No owners found"});
+    }
+    actionsContainer.replaceChild(view, buttonEl);
+  }catch(e){
+    console.error("BatchData owner lookup error:", e);
+    const err=el("span",{class:"error", text:"Owner lookup failed"});
+    actionsContainer.replaceChild(err, buttonEl);
+  }
+}
+
+function zillowButton(link){
+  const a=el("a",{class:"pill",href:link,target:"_blank",rel:"noopener"});
+  a.appendChild(el("span",{text:"Zillow"}));
+  return a;
+}
+
+/** File ingest & lead parsing **/
+const drop=$("#drop"), fileInput=$("#fileInput"), leadBody=$("#leadBody"), ingestStatus=$("#ingestStatus");
+
+["dragenter","dragover"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("drag");}));
+drop.addEventListener("click", ()=> fileInput.click());
+drop.addEventListener("drop", (e)=> handleFiles(e.dataTransfer.files));
+fileInput.addEventListener("change", (e)=> handleFiles(e.target.files));
+
+async function handleFiles(files){
+  if(!files || !files.length) return;
+  const f=files[0];
+  ingestStatus.textContent=`Reading ${f.name}…`;
+  const txt=await f.text();
+  const leads = extractLeadsFromMotivatedSellersHTML(txt);
+  if(!leads.length){
+    ingestStatus.textContent="File loaded, but no lead blocks were found. Check that it contains 'Address / City / State / Zip' labels.";
+    return;
+  }
+  ingestStatus.textContent=`Parsed ${leads.length} lead(s).`;
+  renderLeadList(leads);
+}
+
+function extractLeadsFromMotivatedSellersHTML(htmlText){
+  const tmp = document.createElement("div");
+  tmp.innerHTML = htmlText;
+
+  const leads = [];
+  const rows = tmp.querySelectorAll("table.table tbody tr");
+  rows.forEach(tr => {
+    const tds = tr.querySelectorAll("td");
+    if (tds.length < 7) return;
+
+    const seller  = (tds[0].textContent || "").trim();
+    const phone   = (tds[1].textContent || "").trim();
+    const email   = (tds[2].textContent || "").trim();
+    const address = (tds[3].textContent || "").trim();
+    const city    = (tds[4].textContent || "").trim();
+    const state   = (tds[5].textContent || "").trim();
+    const zipcode = (tds[6].textContent || "").trim();
+    const county  = (tds[7]?.textContent || "").trim();
+
+    if (address && city && state && zipcode) {
+      leads.push({ seller, phone, email, address, city, state, zipcode, county });
+    }
+  });
+
+  if (leads.length) {
+    return leads;
+  }
+
+  const text = (tmp.textContent || "")
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ");
+
+  const re = /Address\s+([^\n]+?)\s+City\s+([^\n]+?)\s+State\s+([A-Z]{2})[\s\S]*?Zip(?:code| Code)?\s+(\d{5})/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const address = m[1].trim();
+    const city    = m[2].trim();
+    const state   = m[3].trim();
+    const zipcode = m[4].trim();
+    leads.push({ seller:"", phone:"", email:"", address, city, state, zipcode, county:"" });
+  }
+  return leads;
+}
+
+function autoPickNum(addressMask){
+  const firstToken=(addressMask||"").trim().split(/\s+/)[0] || "";
+  // Check if first word (after removing numbers and asterisks) is 3 letters long
+  const firstWord = firstToken.replace(/^\d+/, "").replace(/\*/g, "").trim();
+  if(firstWord.length === 3) return 100;
+  const revealedDigits=(firstToken.match(/^\d+/)||[""])[0].length + (firstToken.match(/\*/g)||[]).length;
+  if(firstToken.length===5) return 10;
+  if(firstToken.length===4) return 50;
+  if(revealedDigits===2 || revealedDigits===3) return 100;
+  return 50;
+}
+
+function renderWordWithLength(text){
+  if(!text) return el("div");
+  const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+  const container = el("div");
+  words.forEach(word => {
+    const wrapper = el("div", {class:"word-wrapper"});
+    wrapper.appendChild(el("span", {text: word}));
+    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
+    container.appendChild(wrapper);
+  });
+  return container;
+}
+
+function renderStreetWordsWithLength(address){
+  if(!address) return el("span", {text: ""});
+  const comps = parseTitleComponents(address);
+  if(!comps) return el("span", {text: address});
+  
+  // Only show word lengths for street words, not number, city, state, zip
+  const streetWords = comps.street.trim().split(/\s+/).filter(w => w.length > 0);
+  const container = el("span", {style:"display:inline-block"});
+  streetWords.forEach(word => {
+    const wrapper = el("span", {class:"word-wrapper"});
+    wrapper.appendChild(el("span", {text: word}));
+    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
+    container.appendChild(wrapper);
+  });
+  return container;
+}
+
+function extractSellerPrefixes(sellerText){
+  if(!sellerText) return [];
+  const prefixes = [];
+  const words = sellerText.trim().split(/\s+/).filter(w => w.length > 0);
+  words.forEach(word => {
+    // Find letters before asterisks
+    const match = word.match(/^([A-Za-z]{1,2})[*]+/i);
+    if(match) {
+      prefixes.push(match[1].toLowerCase());
+    }
+  });
+  return prefixes;
+}
+
+function highlightMatchingOwnerName(ownerName, sellerPrefixes){
+  if(!ownerName || !sellerPrefixes.length) {
+    return document.createTextNode(ownerName);
+  }
+  
+  const parts = ownerName.trim().split(/\s+/);
+  const highlighted = parts.map(part => {
+    const partLower = part.toLowerCase();
+    for(const prefix of sellerPrefixes){
+      if(partLower.startsWith(prefix)){
+        const matchLen = prefix.length;
+        const before = part.slice(0, matchLen);
+        const after = part.slice(matchLen);
+        const span = el("span", {}, 
+          el("span", {class:"highlight", text: before}),
+          document.createTextNode(after)
+        );
+        return span;
+      }
+    }
+    return document.createTextNode(part);
+  });
+  
+  const container = el("span");
+  highlighted.forEach((h, i) => {
+    if(i > 0) container.appendChild(document.createTextNode(" "));
+    container.appendChild(h);
+  });
+  return container;
+}
+
+function renderOwnerWithLength(ownerName, sellerPrefixes){
+  const container = el("div");
+  const words = ownerName.trim().split(/\s+/).filter(w => w.length > 0);
+  words.forEach((word, idx) => {
+    const wrapper = el("div", {class:"word-wrapper"});
+    // Check if this word matches any seller prefix
+    const wordLower = word.toLowerCase();
+    let wordElement;
+    for(const prefix of sellerPrefixes){
+      if(wordLower.startsWith(prefix)){
+        const matchLen = prefix.length;
+        const before = word.slice(0, matchLen);
+        const after = word.slice(matchLen);
+        wordElement = el("span", {}, 
+          el("span", {class:"highlight", text: before}),
+          document.createTextNode(after)
+        );
+        break;
+      }
+    }
+    if(!wordElement) {
+      wordElement = document.createTextNode(word);
+    }
+    wrapper.appendChild(wordElement);
+    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
+    container.appendChild(wrapper);
+  });
+  return container;
+}
+
+function renderLeadList(leads){
+  leadBody.innerHTML="";
+  // No longer using global controls - each lead has its own
+  leadMeta.clear();
+
+  const excludedStates = ["SC"];
+
+  // Collected per-row metric refs for relative coloring after all enrichments resolve
+  const enrichments = [];
+
+  leads.forEach((L, idx)=>{
+    const leadKey = `${L.address}|${L.city}|${L.state}|${L.zipcode}`;
+    const tr = el("tr");
+
+    // Mark excluded states with orange-red background
+    if(excludedStates.includes(L.state.toUpperCase())) {
+      tr.classList.add("state-excluded");
+    }
+
+    // Row number (1-based index)
+    const tdNumber = el("td", {style:"text-align:center; font-weight:bold; color:var(--muted)"}, String(idx + 1));
+
+    const tdSeller = el("td");
+    tdSeller.appendChild(renderWordWithLength(L.seller||""));
+    const tdPhone  = el("td",{}, el("div",{text:(L.phone||"")}));
+    const tdEmail  = el("td",{}, el("div",{text:(L.email||"")}));
+    const tdAddr   = el("td");
+    const addrContainer = el("div",{class:"addr"});
+    addrContainer.appendChild(renderWordWithLength(L.address));
+    tdAddr.appendChild(addrContainer);
+    const tdCity = el("td");
+    const cityContainer = el("div");
+    // Format: "City, State Zip (COUNTY, STATE)" or just "City, State Zip" if no county
+    let cityStateZipText = `${L.city}, ${L.state} ${L.zipcode}`;
+    if(L.county && L.county.trim()) {
+      cityStateZipText += ` (${L.county.toUpperCase()}, ${L.state})`;
+    }
+    cityContainer.appendChild(el("div",{text: cityStateZipText}));
+
+    // Market metrics row (loaded async per zipcode)
+    const marketRow = el("div", {style:"margin-top:4px;font-size:11px;color:var(--ink);display:flex;gap:6px;flex-wrap:wrap"});
+    const pendingVal = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
+    const medianVal  = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
+    const activeVal  = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
+    const pendingEl = el("span", {}, el("strong",{text:"Pending: "}), pendingVal);
+    const medianEl  = el("span", {}, el("strong",{text:"Median: "}), medianVal);
+    const activeEl  = el("span", {}, el("strong",{text:"Active: "}), activeVal);
+    marketRow.appendChild(pendingEl);
+    marketRow.appendChild(medianEl);
+    marketRow.appendChild(activeEl);
+    cityContainer.appendChild(marketRow);
+
+    const maps = el("a",{
+      class:"pill",
+      href:`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(L.city + ", " + L.state + " " + L.zipcode)}`,
+      target:"_blank",
+      rel:"noopener",
+      style:"margin-top:6px;display:inline-block"
+    }, el("span",{text:"City in Google Maps"}));
+    cityContainer.appendChild(maps);
+    tdCity.appendChild(cityContainer);
+    
+    const tdActions = el("td", {style:"text-align:left"});
+    const actionsWrapper = el("div", {style:"display:flex;align-items:flex-start;gap:20px;width:100%"});
+    
+    const leftActions = el("div", {style:"display:flex;flex-direction:column;gap:6px;align-items:flex-start"});
+    const rightControls = el("div", {style:"display:flex;flex-direction:column;gap:6px;align-items:flex-start;flex-shrink:0"});
+    
+    const startSearchBtn = el("button",{class:"btn btn-primary", text:"Start search"});
+    const open = el("button",{class:"pill", text:"Results"});
+    const doneBtn = el("button",{class:"btn", text:"Done"});
+    
+    // Per-lead owners input
+    const ownersInput = el("input", {
+      type:"number",
+      value:"20",
+      min:"0",
+      style:"width:50px;padding:3px 5px;font-size:11px"
+    });
+    const ownersLabel = el("label", {style:"font-size:10px;color:var(--muted)"}, "Owners:");
+    const ownersContainer = el("div", {style:"display:flex;align-items:center;gap:4px"});
+    ownersContainer.appendChild(ownersLabel);
+    ownersContainer.appendChild(ownersInput);
+    
+    // Per-lead search depth control
+    const depthContainer = el("div", {style:"display:flex;flex-direction:column;gap:2px;align-items:flex-start"});
+    const depthLabel = el("label", {style:"font-size:10px;color:var(--muted)"}, "Search depth:");
+    const depthChoices = el("div", {class:"choices", style:"display:flex;gap:3px;flex-wrap:wrap"});
+    let leadSelectedNum = autoPickNum(L.address);
+    
+    // Set leadMeta first so choiceBar onChange can update it
+    leadMeta.set(leadKey, { searchBtn: open, seller: L.seller, ownersInput: ownersInput, depthChoices: depthChoices, selectedNum: leadSelectedNum, row: tr });
+    
+    choiceBar(depthChoices, leadSelectedNum, n=>{
+      leadSelectedNum = n;
+      const meta = leadMeta.get(leadKey);
+      if(meta) meta.selectedNum = n;
+    });
+    depthContainer.appendChild(depthLabel);
+    depthContainer.appendChild(depthChoices);
+    
+    doneBtn.addEventListener("click", ()=>{
+      tr.classList.toggle("checked");
+    });
+    
+    startSearchBtn.addEventListener("click", async ()=>{
+      startSearchBtn.classList.add("searching");
+      startSearchBtn.disabled = true;
+      startSearchBtn.textContent = "Searching...";
+      
+      // Set up drawer state for this lead (even if drawer isn't open)
+      drawerLeadKey = leadKey;
+      inputArea.value = `${L.address}\t${L.city}\t${L.state}\t${L.zipcode}`;
+      
+      // Use per-lead values
+      drawerAutoOwners.value = ownersInput.value || "20";
+      drawerSelectedNum = leadSelectedNum;
+      
+      drawerTitle.textContent = `Search & Owners — ${L.city}, ${L.state}`;
+      
+      // Start search in background (runs concurrently)
+      runSearch(leadKey).then(() => {
+        startSearchBtn.classList.remove("searching");
+        startSearchBtn.disabled = false;
+        startSearchBtn.textContent = "Start search";
+      }).catch((err) => {
+        console.error("Search error:", err);
+        startSearchBtn.classList.remove("searching");
+        startSearchBtn.disabled = false;
+        startSearchBtn.textContent = "Start search";
+      });
+    });
+    
+    // Start search button moved next to city/state/zip
+    const cityStartWrapper = el("div", {style:"margin-top:6px"});
+    cityStartWrapper.appendChild(startSearchBtn);
+    cityContainer.appendChild(cityStartWrapper);
+
+    leftActions.appendChild(open);
+    leftActions.appendChild(doneBtn);
+    
+    rightControls.appendChild(depthContainer);
+    rightControls.appendChild(ownersContainer);
+    
+    actionsWrapper.appendChild(leftActions);
+    actionsWrapper.appendChild(rightControls);
+    tdActions.appendChild(actionsWrapper);
+
+    open.addEventListener("click", ()=>{
+      drawerLeadKey = leadKey;
+      inputArea.value = `${L.address}\t${L.city}\t${L.state}\t${L.zipcode}`;
+      
+      // Sync drawer controls with per-lead settings
+      const meta = leadMeta.get(leadKey);
+      const ownersValue = meta && meta.ownersInput ? meta.ownersInput.value : "20";
+      const depthValue = meta && meta.selectedNum !== undefined ? meta.selectedNum : autoPickNum(L.address);
+      drawerAutoOwners.value = ownersValue;
+      drawerSelectedNum = depthValue;
+      choiceBar(drawerNumChoices, drawerSelectedNum, n=>drawerSelectedNum=n);
+      
+      drawerTitle.textContent = `Search & Owners — ${L.city}, ${L.state}`;
+      
+      // Populate lead details in drawer
+      const leadDetails = $("#leadDetails");
+      const sellerEl = $("#drawerSeller");
+      sellerEl.innerHTML = "";
+      sellerEl.appendChild(renderWordWithLength(L.seller || ""));
+      $("#drawerPhone").textContent = L.phone || "";
+      $("#drawerEmail").textContent = L.email || "";
+      const addrEl = $("#drawerAddress");
+      addrEl.innerHTML = "";
+      addrEl.appendChild(renderWordWithLength(L.address || ""));
+      // Format: "City, State Zip (COUNTY, STATE)" or just "City, State Zip" if no county
+      let cityStateZipText = `${L.city}, ${L.state} ${L.zipcode}`;
+      if(L.county && L.county.trim()) {
+        cityStateZipText += ` (${L.county.toUpperCase()}, ${L.state})`;
+      }
+      $("#drawerCityStateZip").textContent = cityStateZipText;
+      leadDetails.style.display = "block";
+      
+      // Load stored results if they exist, otherwise start new search
+      if(searchResults.has(leadKey) && searchResults.get(leadKey).items && searchResults.get(leadKey).items.length > 0) {
+        loadSearchResults(leadKey);
+      } else {
+        bar.style.width="0%";
+        statusEl.textContent="Ready";
+        resultsBody.innerHTML="";
+        // Start search
+        runSearch(leadKey).catch(console.error);
+      }
+      
+      drawer.classList.add("open");
+    });
+
+    tr.appendChild(tdNumber);
+    tr.appendChild(tdActions);
+    tr.appendChild(tdSeller);
+    tr.appendChild(tdPhone);
+    tr.appendChild(tdEmail);
+    tr.appendChild(tdAddr);
+    tr.appendChild(tdCity);
+    leadBody.appendChild(tr);
+
+    // Async enrichment with pending %, median list price, active listings
+    const enrichP = getZipMetrics(L.zipcode, L.state).then(m=>{
+      if(!m){
+        pendingVal.textContent = "n/a";
+        medianVal.textContent  = "n/a";
+        activeVal.textContent  = "n/a";
+        pendingVal.style.background = "#f3f4f6";
+        medianVal.style.background  = "#f3f4f6";
+        activeVal.style.background  = "#f3f4f6";
+        marketRow.title = "No data for this zip in latest month (or data file unreachable — open via http server)";
+        marketRow.style.color = "var(--muted)";
+        return null;
+      }
+      pendingVal.textContent = fmtPct(m.pending_pct);
+      medianVal.textContent  = fmtMoney(m.median_price);
+      activeVal.textContent  = fmtInt(m.active);
+      marketRow.title = `Source: ${L.zipcode} (${m.name||""}) — pending=${m.pending}, total=${m.total}`;
+      return { pendingVal, medianVal, activeVal, m };
+    }).catch(err=>{
+      console.warn("Zip metrics error:", err);
+      return null;
+    });
+    enrichments.push(enrichP);
+  });
+
+  // Once all enrichments resolve, color the values relative to each other
+  Promise.all(enrichments).then(results=>{
+    const valid = results.filter(Boolean);
+    if(valid.length < 2) return;
+    const pendings = valid.map(x=>x.m.pending_pct).filter(v=>v!=null);
+    const medians  = valid.map(x=>x.m.median_price).filter(v=>v!=null);
+    const actives  = valid.map(x=>x.m.active).filter(v=>v!=null);
+    valid.forEach(({pendingVal, medianVal, activeVal, m})=>{
+      if(m.pending_pct!=null)  pendingVal.style.background = rankColor(m.pending_pct, pendings);
+      if(m.median_price!=null) medianVal.style.background  = rankColor(m.median_price, medians);
+      if(m.active!=null)       activeVal.style.background  = rankColor(m.active, actives);
+    });
+  });
+}
+
+function rankColor(value, allValues){
+  if(allValues.length < 2) return "transparent";
+  const sorted = [...allValues].sort((a,b)=>a-b);
+  let lower = 0, equal = 0;
+  for(const v of sorted){
+    if(v < value) lower++;
+    else if(v === value) equal++;
+  }
+  const rank = lower + (equal - 1) / 2;          // average rank for ties
+  const pct  = rank / (sorted.length - 1);       // 0 = worst, 1 = best
+  const hue  = Math.round(pct * 120);            // 0 = red, 120 = green
+  return `hsl(${hue}, 75%, 80%)`;
+}
+</script>
+</body>
+</html>
