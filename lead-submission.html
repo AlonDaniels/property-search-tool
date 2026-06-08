@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lead Submission Form</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px auto;
+      max-width: 600px;
+    }
+    textarea, input, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 5px;
+    }
+    #output {
+      background: #f4f4f4;
+      border: 1px solid #ccc;
+      padding: 15px;
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+    .checkbox-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .checkbox-container input {
+      width: auto;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Lead Submission Form</h2>
+
+  <label for="leadInput">Paste Lead Info:</label>
+  <textarea id="leadInput" rows="6" placeholder="Full Name\n123 Main St, Tampa, FL 33702\n8137765123\n8134322343"></textarea>
+
+  <div class="checkbox-container">
+    <input type="checkbox" id="planCheckbox" checked>
+    <label for="planCheckbox">10 Days in Heaven</label>
+  </div>
+
+  <button onclick="submitLead()">Submit Lead</button>
+
+  <div id="output"></div>
+  <div id="selftest" style="margin-top:12px;font-size:12px;color:#666;"></div>
+
+  <script>
+    function toTitleCase(str) {
+      return str
+        .toLowerCase()
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function normalizePhoneTo10Digits(str) {
+      const digits = String(str || "").replace(/\D/g, "");
+      if (digits.length >= 11 && digits[0] === "1") return digits.slice(1, 11);
+      if (digits.length >= 10) return digits.slice(-10);
+      return digits;
+    }
+
+    function extractPhonesFromLine(line) {
+      const digits = (line || "").replace(/\D/g, "");
+      const numbers = [];
+      let i = 0;
+      while (i < digits.length) {
+        if (digits[i] === "1" && digits.length - i >= 11) {
+          numbers.push(digits.slice(i + 1, i + 11));
+          i += 11;
+        } else if (digits.length - i >= 10) {
+          numbers.push(digits.slice(i, i + 10));
+          i += 10;
+        } else break;
+      }
+      return numbers;
+    }
+
+    function parseLead(text) {
+      const lines = text.trim().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      if (lines.length < 3) return null;
+
+      const [fullName, addressLine, ...phoneLines] = lines;
+      const [firstNameRaw, ...lastPartsRaw] = fullName.split(" ");
+      const firstName = toTitleCase(firstNameRaw || "");
+      const lastName = toTitleCase(lastPartsRaw.join(" ") || "Unknown");
+
+      const phones = [];
+      phoneLines.forEach(line => {
+        extractPhonesFromLine(line).forEach(num => phones.push({ value: "+1" + num }));
+      });
+
+      // Improved regex: allow ZIP+4 and trim all fields, use non-greedy matching for street and city
+      const addressMatch = addressLine.match(/^(.*?),\s*(.*?),\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)$/i);
+      let street, city, state, zip;
+      if (addressMatch) {
+        const [ , streetRaw, cityRaw, stateRaw, zipRaw ] = addressMatch;
+        street = (streetRaw || "").trim();
+        city = (cityRaw || "").trim();
+        state = (stateRaw || "").trim().toUpperCase();
+        zip = (zipRaw || "").trim();
+      } else {
+        // Fallback: split by comma, then split state/zip by space
+        const parts = addressLine.split(',').map(s => s.trim());
+        street = parts[0] || "";
+        city = parts[1] || "";
+        let stateZip = (parts[2] || "").split(/\s+/);
+        state = (stateZip[0] || "").toUpperCase();
+        zip = stateZip.slice(1).join(' ');
+      }
+      // Debug output
+      console.log('Parsed address:', { street, city, state, zip });
+
+      return {
+        firstName,
+        lastName,
+        phones,
+        street,
+        city,
+        state,
+        zip
+      };
+    }
+
+    async function submitLead() {
+      const raw = document.getElementById("leadInput").value;
+      const sendPlan = document.getElementById("planCheckbox").checked;
+      const parsed = parseLead(raw);
+      const outputDiv = document.getElementById("output");
+      outputDiv.textContent = "";
+
+      if (!parsed || !parsed.phones || parsed.phones.length === 0) {
+        outputDiv.textContent = "❌ Invalid input. Make sure to provide at least a full name, address, and one phone number.";
+        return;
+      }
+
+      const addressStr = [parsed.street, parsed.city, parsed.state, parsed.zip].filter(Boolean).join(", ");
+      const lines = raw.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const phoneLines = lines.length > 2 ? lines.slice(2) : [];
+      const phonesToSend = [];
+      phoneLines.forEach(line => {
+        extractPhonesFromLine(line).forEach(num => {
+          const normalized = normalizePhoneTo10Digits(num);
+          if (normalized.length === 10) phonesToSend.push(normalized);
+        });
+      });
+
+      const webhookPayload = {
+        type: "Submission Form",
+        source: "PPL",
+        firstName: parsed.firstName,
+        lastName: parsed.lastName,
+        street: parsed.street,
+        city: parsed.city,
+        state: parsed.state,
+        zip: parsed.zip,
+        address: addressStr,
+        "10_days_in_heaven": String(sendPlan)
+      };
+      phonesToSend.forEach((num, i) => {
+        webhookPayload["phone" + (i + 1)] = "+1" + String(num);
+      });
+
+      try {
+        const formBody = new URLSearchParams(webhookPayload).toString();
+        const response = await fetch("https://hooks.zapier.com/hooks/catch/23080693/uc2amcw/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: formBody
+        });
+
+        const result = await response.json().catch(() => ({ status: response.status, statusText: response.statusText }));
+        const success = response.ok || (result && result.status === "success");
+        let output = success
+          ? "✅ Lead submitted successfully.\n\nPhones sent: " + phonesToSend.map(n => "+1" + n).join(", ") + "\n\n" + JSON.stringify(result, null, 2)
+          : "❌ Submission failed.\n\n" + JSON.stringify(result, null, 2);
+        outputDiv.textContent = output;
+      } catch (error) {
+        console.error("❌ Submission error:", error);
+        outputDiv.textContent = "❌ Failed to submit lead. See console for details.";
+      }
+    }
+
+    (function selfTest() {
+      const testInput = "Bett bet\n4447 Irving Rd, Jacksonville, FL 32226\n(314) 123-2344\n(314) 123-2345\n(314) 123-2349";
+      const lines = testInput.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const phoneLines = lines.length > 2 ? lines.slice(2) : [];
+      const phonesToSend = [];
+      phoneLines.forEach(line => {
+        extractPhonesFromLine(line).forEach(num => {
+          const normalized = normalizePhoneTo10Digits(num);
+          if (normalized.length === 10) phonesToSend.push(String(normalized));
+        });
+      });
+      const expected = ["3141232344", "3141232345", "3141232349"];
+      const ok = phonesToSend.length === 3 && phonesToSend[0] === expected[0] && phonesToSend[1] === expected[1] && phonesToSend[2] === expected[2];
+      const el = document.getElementById("selftest");
+      if (el) el.textContent = (ok ? "✓ " : "✗ ") + "Phone strip test: phone1=+" + (phonesToSend[0] ? "1" + phonesToSend[0] : "?") + ", phone2=+" + (phonesToSend[1] ? "1" + phonesToSend[1] : "?") + ", phone3=+" + (phonesToSend[2] ? "1" + phonesToSend[2] : "?") + (ok ? " (with +1)" : " — expected +13141232344, +13141232345, +13141232349");
+    })();
+  </script>
+</body>
+</html>
