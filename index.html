@@ -98,10 +98,9 @@
   .word-wrapper[data-len]::after{content:"(" attr(data-len) ")";display:block;font-size:9px;color:var(--muted);line-height:1.2;-webkit-user-select:none;user-select:none}
   .highlight{background-color:#fef3c7;color:#92400e;font-weight:600;padding:0 2px;border-radius:2px}
   #tabBar .btn{min-width:64px;justify-content:center}
-  .leaflet-container{font:inherit}
+  #leafletMap{width:100%}
 </style>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBLN-krGRumHCk0La1p8XlFBMQOCIDtpHs"></script>
 </head>
 <body>
 <header>
@@ -1316,25 +1315,30 @@ let reviewIdx = 0;
 
 function ensureMap(){
   if(leafletMap) return leafletMap;
-  leafletMap = L.map('leafletMap', { scrollWheelZoom:true }).setView([39.5,-98.35], 4);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    subdomains:'abcd', maxZoom:20, attribution:'&copy; OpenStreetMap, &copy; CARTO'
-  }).addTo(leafletMap);
+  leafletMap = new google.maps.Map(document.getElementById('leafletMap'), {
+    center: { lat:39.5, lng:-98.35 }, zoom: 4,
+    mapTypeControl: true, streetViewControl: true, fullscreenControl: false,
+    gestureHandling: 'greedy', clickableIcons: true
+  });
   return leafletMap;
 }
 function keyOf(Ld){ return `${Ld.address}|${Ld.city}|${Ld.state}|${Ld.zipcode}`; }
+function markerIcon(isCur){
+  return { path: google.maps.SymbolPath.CIRCLE, scale: isCur?10:7, fillColor:'#e11d48', fillOpacity:0.95, strokeColor: isCur?'#111':'#fff', strokeWeight: isCur?3:2 };
+}
 function makeMarker(lat,lng){
-  return L.circleMarker([lat,lng], { radius:7, color:'#fff', weight:2, fillColor:'#e11d48', fillOpacity:0.95 });
+  return new google.maps.Marker({ position:{ lat, lng }, icon: markerIcon(false) });
 }
 function fitMapBounds(){
-  const pts = [];
-  mapMarkers.forEach(mk => pts.push(mk.getLatLng()));
-  if(pts.length) leafletMap.fitBounds(L.latLngBounds(pts).pad(0.25));
-  else leafletMap.setView([39.5,-98.35], 4);
+  const b = new google.maps.LatLngBounds();
+  let n = 0;
+  mapMarkers.forEach(mk => { b.extend(mk.getPosition()); n++; });
+  if(n) leafletMap.fitBounds(b, 40);
+  else { leafletMap.setCenter({ lat:39.5, lng:-98.35 }); leafletMap.setZoom(4); }
 }
 function buildMap(leads){
   ensureMap();
-  mapMarkers.forEach(mk => leafletMap.removeLayer(mk));
+  mapMarkers.forEach(mk => mk.setMap(null));
   mapMarkers.clear();
   reviewLeads = leads.slice();
   reviewIdx = 0;
@@ -1344,8 +1348,8 @@ function buildMap(leads){
       const key = keyOf(Ld);
       if(m && m.lat!=null && m.lng!=null && !mapMarkers.has(key)){
         const mk = makeMarker(m.lat, m.lng);
-        mk.on('click', () => { const i = reviewLeads.indexOf(Ld); if(i>=0){ reviewIdx=i; renderReview(); focusCurrent(); } });
-        mk.addTo(leafletMap);
+        mk.addListener('click', () => { const i = reviewLeads.indexOf(Ld); if(i>=0){ reviewIdx=i; renderReview(); focusCurrent(); } });
+        mk.setMap(leafletMap);
         mapMarkers.set(key, mk);
       }
       if(Ld === reviewLeads[reviewIdx]){ renderReview(); if(document.getElementById('mapView').style.display !== 'none') focusCurrent(); }
@@ -1359,15 +1363,15 @@ function highlightCurrent(){
   const curKey = Ld ? keyOf(Ld) : null;
   mapMarkers.forEach((mk, key) => {
     const isCur = key === curKey;
-    mk.setStyle({ radius: isCur?11:7, color: isCur?'#111':'#fff', weight: isCur?3:2 });
-    if(isCur) mk.bringToFront();
+    mk.setIcon(markerIcon(isCur));
+    mk.setZIndex(isCur ? 1000 : 1);
   });
 }
 function focusCurrent(){
   const Ld = reviewLeads[reviewIdx];
   if(!Ld) return;
   const mk = mapMarkers.get(keyOf(Ld));
-  if(mk) leafletMap.setView(mk.getLatLng(), FOCUS_ZOOM, { animate:true });
+  if(mk){ leafletMap.panTo(mk.getPosition()); leafletMap.setZoom(FOCUS_ZOOM); }
 }
 function mkChip(text, bg){ return `<span style="padding:1px 6px;border-radius:4px;background:${bg||'#f3f4f6'}">${text}</span>`; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -1448,7 +1452,7 @@ function showTab(which){
   document.getElementById('tabMap').classList.toggle('btn-primary', isMap);
   if(isMap){
     ensureMap();
-    setTimeout(() => { leafletMap.invalidateSize(); renderReview(); focusCurrent(); }, 60);
+    setTimeout(() => { google.maps.event.trigger(leafletMap, 'resize'); renderReview(); focusCurrent(); }, 60);
   }
 }
 document.getElementById('tabList').addEventListener('click', () => showTab('list'));
