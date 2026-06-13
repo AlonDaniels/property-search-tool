@@ -1409,7 +1409,24 @@ function renderReview(){
     '</div>' + noLoc;
   panel.querySelector('#rvPrev').onclick = () => step(-1);
   panel.querySelector('#rvNext').onclick = () => step(1);
-  panel.querySelector('#rvStart').onclick = () => { if(meta.startBtn) meta.startBtn.click(); };
+  const rvStart = panel.querySelector('#rvStart');
+  const syncStart = () => {
+    const done = meta.searchBtn && meta.searchBtn.classList.contains('complete');
+    const searching = meta.startBtn && meta.startBtn.classList.contains('searching');
+    if(done){ rvStart.style.background='#22c55e'; rvStart.style.borderColor='#22c55e'; rvStart.style.color='#fff'; rvStart.textContent='Searched ✓'; }
+    else if(searching){ rvStart.style.background='#f59e0b'; rvStart.style.borderColor='#f59e0b'; rvStart.style.color='#fff'; rvStart.textContent='Searching…'; }
+    else { rvStart.style.background=''; rvStart.style.borderColor=''; rvStart.style.color=''; rvStart.textContent='Start search'; }
+  };
+  syncStart();
+  rvStart.onclick = () => {
+    if(meta.startBtn) meta.startBtn.click();
+    syncStart();
+    let n = 0;
+    const iv = setInterval(() => {
+      syncStart();
+      if((meta.searchBtn && meta.searchBtn.classList.contains('complete')) || ++n > 240) clearInterval(iv);
+    }, 500);
+  };
   panel.querySelector('#rvResults').onclick = () => { if(meta.searchBtn) meta.searchBtn.click(); };
   highlightCurrent();
 }
