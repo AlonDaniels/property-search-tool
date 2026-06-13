@@ -265,6 +265,40 @@ function fmtMoney(v){
 function fmtInt(v){ return v==null ? "—" : String(v); }
 function fmtPop(v){ return v==null ? "—" : Number(v).toLocaleString("en-US"); }
 
+/** Absolute "workability" coloring — fixed thresholds, NOT relative to other leads **/
+const COLOR = {
+  red:         "hsl(0, 75%, 80%)",
+  yellow:      "hsl(48, 88%, 76%)",
+  green:       "hsl(120, 60%, 80%)",
+  greenStrong: "hsl(128, 58%, 60%)"
+};
+function colorPending(v){ // v is a fraction (0.32 = 32%)
+  if(v==null) return null;
+  const p = v*100;
+  if(p >= 40) return COLOR.greenStrong; // fantastic
+  if(p >= 30) return COLOR.green;        // good
+  if(p >= 20) return COLOR.yellow;       // normal
+  return COLOR.red;                      // slow
+}
+function colorMedian(v){
+  if(v==null) return null;
+  if(v >= 250000) return COLOR.green;
+  if(v >= 100000) return COLOR.yellow;
+  return COLOR.red;
+}
+function colorActive(v){
+  if(v==null) return null;
+  if(v < 20 || v > 500) return COLOR.red;
+  if(v < 50 || v > 300) return COLOR.yellow;
+  return COLOR.green;
+}
+function colorPop(v){
+  if(v==null) return null;
+  if(v >= 20000) return COLOR.green;
+  if(v >= 5000)  return COLOR.yellow;
+  return COLOR.red;
+}
+
 /** DOM helpers **/
 function $(sel){return document.querySelector(sel);}
 function el(tag, attrs={}, ...children){
@@ -1221,6 +1255,10 @@ function renderLeadList(leads){
       medianVal.textContent  = fmtMoney(m.median_price);
       activeVal.textContent  = fmtInt(m.active);
       popVal.textContent     = fmtPop(m.pop);
+      pendingVal.style.background = colorPending(m.pending_pct) || "#f3f4f6";
+      medianVal.style.background  = colorMedian(m.median_price) || "#f3f4f6";
+      activeVal.style.background  = colorActive(m.active) || "#f3f4f6";
+      popVal.style.background     = colorPop(m.pop) || "#f3f4f6";
       marketRow.title = `Source: ${L.zipcode} (${m.name||""}) — pending=${m.pending}, total=${m.total}, pop=${m.pop}`;
       return { pendingVal, medianVal, activeVal, popVal, m };
     }).catch(err=>{
@@ -1230,21 +1268,8 @@ function renderLeadList(leads){
     enrichments.push(enrichP);
   });
 
-  // Once all enrichments resolve, color the values relative to each other
-  Promise.all(enrichments).then(results=>{
-    const valid = results.filter(Boolean);
-    if(valid.length < 2) return;
-    const pendings = valid.map(x=>x.m.pending_pct).filter(v=>v!=null);
-    const medians  = valid.map(x=>x.m.median_price).filter(v=>v!=null);
-    const actives  = valid.map(x=>x.m.active).filter(v=>v!=null);
-    const pops     = valid.map(x=>x.m.pop).filter(v=>v!=null);
-    valid.forEach(({pendingVal, medianVal, activeVal, popVal, m})=>{
-      if(m.pending_pct!=null)  pendingVal.style.background = rankColor(m.pending_pct, pendings);
-      if(m.median_price!=null) medianVal.style.background  = rankColor(m.median_price, medians);
-      if(m.active!=null)       activeVal.style.background  = rankColor(m.active, actives);
-      if(m.pop!=null)          popVal.style.background     = rankColor(m.pop, pops);
-    });
-  });
+  // Coloring is applied per-cell during enrichment using absolute "workability" thresholds
+  // (see colorPending/colorMedian/colorActive/colorPop). No relative ranking.
 }
 
 function rankColor(value, allValues){
@@ -1262,4 +1287,4 @@ function rankColor(value, allValues){
 }
 </script>
 </body>
-</html>
+</html>rActive/colo
