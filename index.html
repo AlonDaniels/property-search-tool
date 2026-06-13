@@ -263,6 +263,7 @@ function fmtMoney(v){
   return "$"+v;
 }
 function fmtInt(v){ return v==null ? "—" : String(v); }
+function fmtPop(v){ return v==null ? "—" : Number(v).toLocaleString("en-US"); }
 
 /** DOM helpers **/
 function $(sel){return document.querySelector(sel);}
@@ -298,7 +299,7 @@ async function serperSearchMany(query, num){
   const resultsPerPage = 10;
   const totalPages = Math.ceil(num / resultsPerPage);
   const allResults = [];
-  
+
   for(let page = 1; page <= totalPages && allResults.length < num; page++){
     const payload={q:query, num:resultsPerPage, gl:"us", hl:"en", type:"search", page};
   const res=await fetch("/api/serper",{
@@ -310,14 +311,14 @@ async function serperSearchMany(query, num){
   const data=await res.json();
     const pageResults = data.organic||[];
     allResults.push(...pageResults);
-    
+
     // If we got fewer results than requested, we've reached the end
     if(pageResults.length < resultsPerPage) break;
-    
+
     // Small delay between pages to avoid rate limiting
     if(page < totalPages) await new Promise(resolve => setTimeout(resolve, 500));
   }
-  
+
   // Return up to the requested number
   return allResults.slice(0, num);
 }
@@ -436,7 +437,7 @@ async function runSearch(leadKeyForSearch = null){
     }
     return;
   }
-  
+
   // Get per-lead settings - always get fresh values
   const leadMetaData = leadMeta.get(currentLeadKey);
   // Get the current selectedNum from meta, or calculate it if not set
@@ -453,7 +454,7 @@ async function runSearch(leadKeyForSearch = null){
     }
   }
   const leadOwners = leadMetaData && leadMetaData.ownersInput ? leadMetaData.ownersInput.value : "20";
-  
+
   // Initialize or get search state for this lead
   if(!searchResults.has(currentLeadKey)) {
     searchResults.set(currentLeadKey, { items: [], status: "Starting…", progress: 0, sellerPrefixes: [] });
@@ -461,7 +462,7 @@ async function runSearch(leadKeyForSearch = null){
   const searchState = searchResults.get(currentLeadKey);
   searchState.status = "Starting…";
   searchState.progress = 0;
-  
+
   // Update UI if this is the currently displayed lead
   if(currentLeadKey === drawerLeadKey) {
   statusEl.textContent="Starting…";
@@ -505,7 +506,7 @@ async function runSearch(leadKeyForSearch = null){
   if(currentLeadKey === drawerLeadKey && drawer.classList.contains("open")) {
     statusEl.textContent = searchState.status;
   }
-  
+
   for(const number of numberRange){
     const q=`${number} ${city} ${state} ${zipcode} site:zillow.com`;
     try{
@@ -542,34 +543,34 @@ async function runSearch(leadKeyForSearch = null){
 
   // Use per-lead owners value
   const topN = Math.max(0, parseInt(leadOwners || (drawerAutoOwners.value||"20"),10));
-  
+
   // Get seller prefixes for highlighting
   let sellerPrefixes = [];
   if (currentLeadKey && leadMetaData && leadMetaData.seller) {
     sellerPrefixes = extractSellerPrefixes(leadMetaData.seller);
   }
-  
+
   // Store results immediately
   searchState.sellerPrefixes = sellerPrefixes;
   searchState.items = items;
   searchState.topN = topN;
   searchState.status = `Found ${items.length} result(s).`;
-  
+
   // Render results if this is the currently displayed lead
   if(currentLeadKey === drawerLeadKey && drawer.classList.contains("open")) {
     loadSearchResults(currentLeadKey);
   }
-  
+
   // Fetch owners in background (non-blocking) - don't await, runs concurrently
   fetchOwnersForResults(currentLeadKey, items, topN, sellerPrefixes).catch(console.error);
-  
+
   // Update button state and row color
   if (currentLeadKey && leadMeta.has(currentLeadKey)) {
     const meta = leadMeta.get(currentLeadKey);
     if (meta && meta.searchBtn) {
       meta.searchBtn.classList.add("complete");
       meta.searchBtn.textContent = "Results ✓";
-      
+
       // Add search-done class to the row (light orange background)
       if (meta.row) {
         meta.row.classList.add("search-done");
@@ -586,11 +587,11 @@ function loadSearchResults(leadKey) {
     bar.style.width = "0%";
     return;
   }
-  
+
   const { items, sellerPrefixes, topN, status } = searchState;
   resultsBody.innerHTML = "";
   statusEl.textContent = status || `Found ${items.length} result(s).`;
-  
+
   items.forEach(([address,link], idx)=>{
     const tr=el("tr");
     const tdA=el("td");
@@ -606,7 +607,7 @@ function loadSearchResults(leadKey) {
     tdA.appendChild(addrContainer);
     const tdB=el("td");
     const actions=el("div",{class:"actions"});
-    
+
     // Copy button
     const copyBtn=el("button",{class:"btn", text:"Copy"});
     copyBtn.addEventListener("click", ()=>{
@@ -626,7 +627,7 @@ function loadSearchResults(leadKey) {
     });
     actions.appendChild(copyBtn);
     actions.appendChild(zillowButton(link));
-    
+
     // Check if owners are already loaded for this address
     const ownerData = searchState.owners && searchState.owners.get(address);
     if(ownerData) {
@@ -640,17 +641,17 @@ function loadSearchResults(leadKey) {
     } else {
       // Always show "Find owner" button for each row
     const findBtn=el("button",{class:"finder", text:"Find owner"});
-      findBtn.addEventListener("click", async ()=>{ 
+      findBtn.addEventListener("click", async ()=>{
         await replaceWithOwners(actions, findBtn, address, sellerPrefixes || [], leadKey);
       });
     actions.appendChild(findBtn);
     }
-    
+
     tdB.appendChild(actions);
     tr.appendChild(tdA); tr.appendChild(tdB);
     resultsBody.appendChild(tr);
   });
-  
+
   if(searchState.progress > 0) {
     bar.style.width = searchState.progress + "%";
   }
@@ -659,15 +660,15 @@ function loadSearchResults(leadKey) {
 async function fetchOwnersForResults(leadKey, items, topN, sellerPrefixes) {
   const searchState = searchResults.get(leadKey);
   if(!searchState) return;
-  
+
   if(!searchState.owners) {
     searchState.owners = new Map();
   }
-  
+
   // Track how many owners have been fetched (default to 0, or use existing value)
   const startIdx = searchState.ownersFetched || 0;
   const endIdx = Math.min(startIdx + topN, items.length);
-  
+
   // If we've already fetched all owners, don't do anything
   if(startIdx >= items.length) {
     if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
@@ -675,35 +676,35 @@ async function fetchOwnersForResults(leadKey, items, topN, sellerPrefixes) {
     }
     return;
   }
-  
+
   searchState.status = `Fetching owners for ${startIdx + 1}-${endIdx} of ${items.length}…`;
   if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
     statusEl.textContent = searchState.status;
   }
-  
+
   for(let i=startIdx; i<endIdx; i++){
     const [address] = items[i];
     const comps = parseTitleComponents(address);
     if(!comps) continue;
-    
+
     const addrObj = {
       street: `${comps.number} ${comps.street}`,
       city: comps.city,
       state: comps.state,
       zip: comps.zipcode
     };
-    
+
     try {
       const owners = await batchdataOwners(addrObj);
       searchState.owners.set(address, owners);
-      
+
       // Update UI if this is the currently displayed lead AND drawer is open
       if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
         const pct = Math.round(((i+1)/items.length)*100);
         searchState.progress = pct;
         bar.style.width = pct + "%";
         statusEl.textContent = `Owners: ${i+1}/${items.length} loaded…`;
-        
+
         // Update the specific row if it's visible
         const rows = resultsBody.querySelectorAll("tr");
         if(rows[i]) {
@@ -726,10 +727,10 @@ async function fetchOwnersForResults(leadKey, items, topN, sellerPrefixes) {
       console.error("BatchData owner lookup error:", e);
     }
   }
-  
+
   // Update ownersFetched count
   searchState.ownersFetched = endIdx;
-  
+
   if(leadKey === drawerLeadKey && drawer.classList.contains("open")) {
     if(endIdx >= items.length) {
       searchState.status = `Done. All ${items.length} owners loaded.`;
@@ -765,14 +766,14 @@ async function replaceWithOwners(actionsContainer, buttonEl, address, sellerPref
 
   try{
     const owners=await batchdataOwners(addrObj);
-    
+
     // Store owners in searchState if leadKey provided
     if(leadKey && searchResults.has(leadKey)) {
       const searchState = searchResults.get(leadKey);
       if(!searchState.owners) searchState.owners = new Map();
       searchState.owners.set(address, owners);
     }
-    
+
     let view;
     if(owners.length){
       const ownerContainer = el("div", {class:"owners-inline"});
@@ -895,7 +896,7 @@ function renderStreetWordsWithLength(address){
   if(!address) return el("span", {text: ""});
   const comps = parseTitleComponents(address);
   if(!comps) return el("span", {text: address});
-  
+
   // Only show word lengths for street words, not number, city, state, zip
   const streetWords = comps.street.trim().split(/\s+/).filter(w => w.length > 0);
   const container = el("span", {style:"display:inline-block"});
@@ -926,7 +927,7 @@ function highlightMatchingOwnerName(ownerName, sellerPrefixes){
   if(!ownerName || !sellerPrefixes.length) {
     return document.createTextNode(ownerName);
   }
-  
+
   const parts = ownerName.trim().split(/\s+/);
   const highlighted = parts.map(part => {
     const partLower = part.toLowerCase();
@@ -935,7 +936,7 @@ function highlightMatchingOwnerName(ownerName, sellerPrefixes){
         const matchLen = prefix.length;
         const before = part.slice(0, matchLen);
         const after = part.slice(matchLen);
-        const span = el("span", {}, 
+        const span = el("span", {},
           el("span", {class:"highlight", text: before}),
           document.createTextNode(after)
         );
@@ -944,7 +945,7 @@ function highlightMatchingOwnerName(ownerName, sellerPrefixes){
     }
     return document.createTextNode(part);
   });
-  
+
   const container = el("span");
   highlighted.forEach((h, i) => {
     if(i > 0) container.appendChild(document.createTextNode(" "));
@@ -1027,12 +1028,15 @@ function renderLeadList(leads){
     const pendingVal = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
     const medianVal  = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
     const activeVal  = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
+    const popVal     = el("span", {style:"padding:1px 6px;border-radius:4px;background:#f3f4f6", text:"…"});
     const pendingEl = el("span", {}, el("strong",{text:"Pending: "}), pendingVal);
     const medianEl  = el("span", {}, el("strong",{text:"Median: "}), medianVal);
     const activeEl  = el("span", {}, el("strong",{text:"Active: "}), activeVal);
+    const popEl     = el("span", {}, el("strong",{text:"Pop: "}), popVal);
     marketRow.appendChild(pendingEl);
     marketRow.appendChild(medianEl);
     marketRow.appendChild(activeEl);
+    marketRow.appendChild(popEl);
     cityContainer.appendChild(marketRow);
 
     const maps = el("a",{
@@ -1044,17 +1048,17 @@ function renderLeadList(leads){
     }, el("span",{text:"City in Google Maps"}));
     cityContainer.appendChild(maps);
     tdCity.appendChild(cityContainer);
-    
+
     const tdActions = el("td", {style:"text-align:left"});
     const actionsWrapper = el("div", {style:"display:flex;align-items:flex-start;gap:20px;width:100%"});
-    
+
     const leftActions = el("div", {style:"display:flex;flex-direction:column;gap:6px;align-items:flex-start"});
     const rightControls = el("div", {style:"display:flex;flex-direction:column;gap:6px;align-items:flex-start;flex-shrink:0"});
-    
+
     const startSearchBtn = el("button",{class:"btn btn-primary", text:"Start search"});
     const open = el("button",{class:"pill", text:"Results"});
     const doneBtn = el("button",{class:"btn", text:"Done"});
-    
+
     // Per-lead owners input
     const ownersInput = el("input", {
       type:"number",
@@ -1066,16 +1070,16 @@ function renderLeadList(leads){
     const ownersContainer = el("div", {style:"display:flex;align-items:center;gap:4px"});
     ownersContainer.appendChild(ownersLabel);
     ownersContainer.appendChild(ownersInput);
-    
+
     // Per-lead search depth control
     const depthContainer = el("div", {style:"display:flex;flex-direction:column;gap:2px;align-items:flex-start"});
     const depthLabel = el("label", {style:"font-size:10px;color:var(--muted)"}, "Search depth:");
     const depthChoices = el("div", {class:"choices", style:"display:flex;gap:3px;flex-wrap:wrap"});
     let leadSelectedNum = autoPickNum(L.address);
-    
+
     // Set leadMeta first so choiceBar onChange can update it
     leadMeta.set(leadKey, { searchBtn: open, seller: L.seller, ownersInput: ownersInput, depthChoices: depthChoices, selectedNum: leadSelectedNum, row: tr });
-    
+
     choiceBar(depthChoices, leadSelectedNum, n=>{
       leadSelectedNum = n;
       const meta = leadMeta.get(leadKey);
@@ -1083,26 +1087,26 @@ function renderLeadList(leads){
     });
     depthContainer.appendChild(depthLabel);
     depthContainer.appendChild(depthChoices);
-    
+
     doneBtn.addEventListener("click", ()=>{
       tr.classList.toggle("checked");
     });
-    
+
     startSearchBtn.addEventListener("click", async ()=>{
       startSearchBtn.classList.add("searching");
       startSearchBtn.disabled = true;
       startSearchBtn.textContent = "Searching...";
-      
+
       // Set up drawer state for this lead (even if drawer isn't open)
       drawerLeadKey = leadKey;
       inputArea.value = `${L.address}\t${L.city}\t${L.state}\t${L.zipcode}`;
-      
+
       // Use per-lead values
       drawerAutoOwners.value = ownersInput.value || "20";
       drawerSelectedNum = leadSelectedNum;
-      
+
       drawerTitle.textContent = `Search & Owners — ${L.city}, ${L.state}`;
-      
+
       // Start search in background (runs concurrently)
       runSearch(leadKey).then(() => {
         startSearchBtn.classList.remove("searching");
@@ -1115,7 +1119,7 @@ function renderLeadList(leads){
         startSearchBtn.textContent = "Start search";
       });
     });
-    
+
     // Start search button moved next to city/state/zip
     const cityStartWrapper = el("div", {style:"margin-top:6px"});
     cityStartWrapper.appendChild(startSearchBtn);
@@ -1123,10 +1127,10 @@ function renderLeadList(leads){
 
     leftActions.appendChild(open);
     leftActions.appendChild(doneBtn);
-    
+
     rightControls.appendChild(depthContainer);
     rightControls.appendChild(ownersContainer);
-    
+
     actionsWrapper.appendChild(leftActions);
     actionsWrapper.appendChild(rightControls);
     tdActions.appendChild(actionsWrapper);
@@ -1134,7 +1138,7 @@ function renderLeadList(leads){
     open.addEventListener("click", ()=>{
       drawerLeadKey = leadKey;
       inputArea.value = `${L.address}\t${L.city}\t${L.state}\t${L.zipcode}`;
-      
+
       // Sync drawer controls with per-lead settings
       const meta = leadMeta.get(leadKey);
       const ownersValue = meta && meta.ownersInput ? meta.ownersInput.value : "20";
@@ -1142,9 +1146,9 @@ function renderLeadList(leads){
       drawerAutoOwners.value = ownersValue;
       drawerSelectedNum = depthValue;
       choiceBar(drawerNumChoices, drawerSelectedNum, n=>drawerSelectedNum=n);
-      
+
       drawerTitle.textContent = `Search & Owners — ${L.city}, ${L.state}`;
-      
+
       // Populate lead details in drawer
       const leadDetails = $("#leadDetails");
       const sellerEl = $("#drawerSeller");
@@ -1174,7 +1178,7 @@ function renderLeadList(leads){
       });
       countyWrap.appendChild(countyBtn);
       leadDetails.style.display = "block";
-      
+
       // Load stored results if they exist, otherwise start new search
       if(searchResults.has(leadKey) && searchResults.get(leadKey).items && searchResults.get(leadKey).items.length > 0) {
         loadSearchResults(leadKey);
@@ -1185,7 +1189,7 @@ function renderLeadList(leads){
         // Start search
         runSearch(leadKey).catch(console.error);
       }
-      
+
       drawer.classList.add("open");
     });
 
@@ -1204,9 +1208,11 @@ function renderLeadList(leads){
         pendingVal.textContent = "n/a";
         medianVal.textContent  = "n/a";
         activeVal.textContent  = "n/a";
+        popVal.textContent     = "n/a";
         pendingVal.style.background = "#f3f4f6";
         medianVal.style.background  = "#f3f4f6";
         activeVal.style.background  = "#f3f4f6";
+        popVal.style.background     = "#f3f4f6";
         marketRow.title = "No data for this zip in latest month (or data file unreachable — open via http server)";
         marketRow.style.color = "var(--muted)";
         return null;
@@ -1214,8 +1220,9 @@ function renderLeadList(leads){
       pendingVal.textContent = fmtPct(m.pending_pct);
       medianVal.textContent  = fmtMoney(m.median_price);
       activeVal.textContent  = fmtInt(m.active);
-      marketRow.title = `Source: ${L.zipcode} (${m.name||""}) — pending=${m.pending}, total=${m.total}`;
-      return { pendingVal, medianVal, activeVal, m };
+      popVal.textContent     = fmtPop(m.pop);
+      marketRow.title = `Source: ${L.zipcode} (${m.name||""}) — pending=${m.pending}, total=${m.total}, pop=${m.pop}`;
+      return { pendingVal, medianVal, activeVal, popVal, m };
     }).catch(err=>{
       console.warn("Zip metrics error:", err);
       return null;
@@ -1230,10 +1237,12 @@ function renderLeadList(leads){
     const pendings = valid.map(x=>x.m.pending_pct).filter(v=>v!=null);
     const medians  = valid.map(x=>x.m.median_price).filter(v=>v!=null);
     const actives  = valid.map(x=>x.m.active).filter(v=>v!=null);
-    valid.forEach(({pendingVal, medianVal, activeVal, m})=>{
+    const pops     = valid.map(x=>x.m.pop).filter(v=>v!=null);
+    valid.forEach(({pendingVal, medianVal, activeVal, popVal, m})=>{
       if(m.pending_pct!=null)  pendingVal.style.background = rankColor(m.pending_pct, pendings);
       if(m.median_price!=null) medianVal.style.background  = rankColor(m.median_price, medians);
       if(m.active!=null)       activeVal.style.background  = rankColor(m.active, actives);
+      if(m.pop!=null)          popVal.style.background     = rankColor(m.pop, pops);
     });
   });
 }
