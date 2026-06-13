@@ -100,7 +100,8 @@
   #tabBar .btn{min-width:64px;justify-content:center}
   #leafletMap{width:100%}
 </style>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBLN-krGRumHCk0La1p8XlFBMQOCIDtpHs"></script>
+<script>window.__gmapsReady = new Promise(function(res){ window.__gmapsInit = res; });</script>
+<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBLN-krGRumHCk0La1p8XlFBMQOCIDtpHs&loading=async&callback=__gmapsInit"></script>
 </head>
 <body>
 <header>
@@ -1313,8 +1314,9 @@ const mapMarkers = new Map();   // leadKey -> circleMarker
 let reviewLeads = [];
 let reviewIdx = 0;
 
-function ensureMap(){
+async function ensureMap(){
   if(leafletMap) return leafletMap;
+  await window.__gmapsReady;
   leafletMap = new google.maps.Map(document.getElementById('leafletMap'), {
     center: { lat:39.5, lng:-98.35 }, zoom: 4,
     mapTypeControl: true, streetViewControl: true, fullscreenControl: false,
@@ -1336,8 +1338,8 @@ function fitMapBounds(){
   if(n) leafletMap.fitBounds(b, 40);
   else { leafletMap.setCenter({ lat:39.5, lng:-98.35 }); leafletMap.setZoom(4); }
 }
-function buildMap(leads){
-  ensureMap();
+async function buildMap(leads){
+  await ensureMap();
   mapMarkers.forEach(mk => mk.setMap(null));
   mapMarkers.clear();
   reviewLeads = leads.slice();
@@ -1451,8 +1453,9 @@ function showTab(which){
   document.getElementById('tabList').classList.toggle('btn-primary', !isMap);
   document.getElementById('tabMap').classList.toggle('btn-primary', isMap);
   if(isMap){
-    ensureMap();
-    setTimeout(() => { google.maps.event.trigger(leafletMap, 'resize'); renderReview(); focusCurrent(); }, 60);
+    ensureMap().then(() => {
+      setTimeout(() => { google.maps.event.trigger(leafletMap, 'resize'); renderReview(); focusCurrent(); }, 60);
+    });
   }
 }
 document.getElementById('tabList').addEventListener('click', () => showTab('list'));
