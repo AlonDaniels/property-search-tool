@@ -95,6 +95,7 @@
   .muted{color:#6b7280}
   .word-length{font-size:9px;color:var(--muted);display:block;line-height:1.2}
   .word-wrapper{display:inline-block;margin-right:8px;vertical-align:top;white-space:normal}
+  .word-wrapper[data-len]::after{content:"(" attr(data-len) ")";display:block;font-size:9px;color:var(--muted);line-height:1.2;-webkit-user-select:none;user-select:none}
   .highlight{background-color:#fef3c7;color:#92400e;font-weight:600;padding:0 2px;border-radius:2px}
 </style>
 </head>
@@ -159,6 +160,7 @@
           <div><strong>Address:</strong> <span id="drawerAddress"></span></div>
           <div><strong>City/State/Zip:</strong> <span id="drawerCityStateZip"></span></div>
         </div>
+        <div id="countySearchWrap" style="margin-top:8px"></div>
       </div>
       <div>
         <label>Input block (auto-filled)</label>
@@ -207,6 +209,7 @@
 
 /** Pending % / market data (bundled static JSON, served from /data) **/
 const PENDING_DATA_BASE = "/data";
+const STATE_ABBR_TO_NAME = {AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",DC:"District of Columbia",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming"};
 const stateDataCache = new Map(); // STATE -> { latestMonth, byZip: Map<zip, row> } | "error"
 const stateDataInflight = new Map(); // STATE -> Promise
 
@@ -483,6 +486,17 @@ async function runSearch(leadKeyForSearch = null){
   }
 
   const [numMask,...streetMaskParts]=addrMask.split(/\s+/);
+  const starCount=(numMask.match(/\*/g)||[]).length;
+  if(starCount>2){
+    searchState.items=[];
+    searchState.status=`Blocked: house number "${numMask}" has ${starCount} asterisks. Max 2 allowed (up to 100 street numbers). Reveal more digits of the house number.`;
+    if(currentLeadKey===drawerLeadKey){
+      statusEl.textContent=searchState.status;
+      bar.style.width="0%";
+      resultsBody.innerHTML="";
+    }
+    return;
+  }
   const numberRange=getNumberRange(numMask);
   const targetLens=getStreetNameLengths(streetMaskParts.join(" "));
   const map=new Map();
@@ -868,10 +882,10 @@ function renderWordWithLength(text){
   if(!text) return el("div");
   const words = text.trim().split(/\s+/).filter(w => w.length > 0);
   const container = el("div");
-  words.forEach(word => {
-    const wrapper = el("div", {class:"word-wrapper"});
-    wrapper.appendChild(el("span", {text: word}));
-    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
+  words.forEach((word, i) => {
+    if(i > 0) container.appendChild(document.createTextNode(" "));
+    const wrapper = el("span", {class:"word-wrapper", "data-len": String(word.length)});
+    wrapper.appendChild(document.createTextNode(word));
     container.appendChild(wrapper);
   });
   return container;
@@ -885,10 +899,10 @@ function renderStreetWordsWithLength(address){
   // Only show word lengths for street words, not number, city, state, zip
   const streetWords = comps.street.trim().split(/\s+/).filter(w => w.length > 0);
   const container = el("span", {style:"display:inline-block"});
-  streetWords.forEach(word => {
-    const wrapper = el("span", {class:"word-wrapper"});
-    wrapper.appendChild(el("span", {text: word}));
-    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
+  streetWords.forEach((word, i) => {
+    if(i > 0) container.appendChild(document.createTextNode(" "));
+    const wrapper = el("span", {class:"word-wrapper", "data-len": String(word.length)});
+    wrapper.appendChild(document.createTextNode(word));
     container.appendChild(wrapper);
   });
   return container;
@@ -943,7 +957,8 @@ function renderOwnerWithLength(ownerName, sellerPrefixes){
   const container = el("div");
   const words = ownerName.trim().split(/\s+/).filter(w => w.length > 0);
   words.forEach((word, idx) => {
-    const wrapper = el("div", {class:"word-wrapper"});
+    if(idx > 0) container.appendChild(document.createTextNode(" "));
+    const wrapper = el("span", {class:"word-wrapper", "data-len": String(word.length)});
     // Check if this word matches any seller prefix
     const wordLower = word.toLowerCase();
     let wordElement;
@@ -952,7 +967,7 @@ function renderOwnerWithLength(ownerName, sellerPrefixes){
         const matchLen = prefix.length;
         const before = word.slice(0, matchLen);
         const after = word.slice(matchLen);
-        wordElement = el("span", {}, 
+        wordElement = el("span", {},
           el("span", {class:"highlight", text: before}),
           document.createTextNode(after)
         );
@@ -963,7 +978,6 @@ function renderOwnerWithLength(ownerName, sellerPrefixes){
       wordElement = document.createTextNode(word);
     }
     wrapper.appendChild(wordElement);
-    wrapper.appendChild(el("span", {class:"word-length", text: `(${word.length})`}));
     container.appendChild(wrapper);
   });
   return container;
@@ -1147,6 +1161,18 @@ function renderLeadList(leads){
         cityStateZipText += ` (${L.county.toUpperCase()}, ${L.state})`;
       }
       $("#drawerCityStateZip").textContent = cityStateZipText;
+      // County website search button
+      const countyWrap = $("#countySearchWrap");
+      countyWrap.innerHTML = "";
+      const stateName = STATE_ABBR_TO_NAME[(L.state||"").toUpperCase()] || L.state || "";
+      const countyClean = (L.county||"").trim().replace(/\s+county$/i, "");
+      const countyPlace = countyClean ? `${countyClean} county` : (L.city||"");
+      const countyQuery = `${countyPlace} ${stateName} property search`.replace(/\s+/g," ").trim();
+      const countyBtn = el("button", {class:"btn", text:"County website search"});
+      countyBtn.addEventListener("click", ()=>{
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(countyQuery)}`, "_blank", "noopener");
+      });
+      countyWrap.appendChild(countyBtn);
       leadDetails.style.display = "block";
       
       // Load stored results if they exist, otherwise start new search
