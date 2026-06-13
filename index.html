@@ -97,7 +97,11 @@
   .word-wrapper{display:inline-block;margin-right:8px;vertical-align:top;white-space:normal}
   .word-wrapper[data-len]::after{content:"(" attr(data-len) ")";display:block;font-size:9px;color:var(--muted);line-height:1.2;-webkit-user-select:none;user-select:none}
   .highlight{background-color:#fef3c7;color:#92400e;font-weight:600;padding:0 2px;border-radius:2px}
+  #tabBar .btn{min-width:64px;justify-content:center}
+  .leaflet-container{font:inherit}
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 <header>
@@ -122,6 +126,12 @@
       <div class="small muted" id="ingestStatus">No file loaded.</div>
     </div>
 
+    <div id="tabBar" class="row" style="margin:2px 0 8px">
+      <button id="tabList" class="btn btn-primary" type="button">List</button>
+      <button id="tabMap" class="btn" type="button">Map</button>
+    </div>
+
+    <div id="listView">
     <div class="card panel">
       <h2>2) Leads from inventory</h2>
       <p>Parsed from MotivatedSellers inventory (one row per lead). Click "Search owner" to open the right drawer.</p>
@@ -141,6 +151,16 @@
           </thead>
           <tbody id="leadBody"></tbody>
         </table>
+      </div>
+    </div>
+    </div><!-- /#listView -->
+
+    <div id="mapView" style="display:none">
+      <div class="card panel" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:stretch">
+          <div id="leafletMap" style="flex:1 1 auto;height:74vh;min-height:520px"></div>
+          <div id="reviewPanel" style="width:380px;flex:0 0 380px;border-left:1px solid var(--border);padding:12px;overflow:auto;height:74vh;min-height:520px;box-sizing:border-box"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1112,7 +1132,7 @@ function renderLeadList(leads){
     let leadSelectedNum = autoPickNum(L.address);
 
     // Set leadMeta first so choiceBar onChange can update it
-    leadMeta.set(leadKey, { searchBtn: open, seller: L.seller, ownersInput: ownersInput, depthChoices: depthChoices, selectedNum: leadSelectedNum, row: tr });
+    leadMeta.set(leadKey, { searchBtn: open, startBtn: startSearchBtn, lead: L, seller: L.seller, ownersInput: ownersInput, depthChoices: depthChoices, selectedNum: leadSelectedNum, row: tr });
 
     choiceBar(depthChoices, leadSelectedNum, n=>{
       leadSelectedNum = n;
@@ -1270,6 +1290,8 @@ function renderLeadList(leads){
 
   // Coloring is applied per-cell during enrichment using absolute "workability" thresholds
   // (see colorPending/colorMedian/colorActive/colorPop). No relative ranking.
+
+  buildMap(leads);
 }
 
 function rankColor(value, allValues){
@@ -1285,6 +1307,137 @@ function rankColor(value, allValues){
   const hue  = Math.round(pct * 120);            // 0 = red, 120 = green
   return `hsl(${hue}, 75%, 80%)`;
 }
+
+/* ===== Map / List tabs ===== */
+let leafletMap = null;
+const mapMarkers = new Map();   // leadKey -> circleMarker
+let reviewLeads = [];
+let reviewIdx = 0;
+
+function ensureMap(){
+  if(leafletMap) return leafletMap;
+  leafletMap = L.map('leafletMap', { scrollWheelZoom:true }).setView([39.5,-98.35], 4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    subdomains:'abcd', maxZoom:19, attribution:'&copy; OpenStreetMap, &copy; CARTO'
+  }).addTo(leafletMap);
+  return leafletMap;
+}
+function keyOf(Ld){ return `${Ld.address}|${Ld.city}|${Ld.state}|${Ld.zipcode}`; }
+function makeMarker(lat,lng){
+  return L.circleMarker([lat,lng], { radius:7, color:'#fff', weight:2, fillColor:'#e11d48', fillOpacity:0.95 });
+}
+function fitMapBounds(){
+  const pts = [];
+  mapMarkers.forEach(mk => pts.push(mk.getLatLng()));
+  if(pts.length) leafletMap.fitBounds(L.latLngBounds(pts).pad(0.25));
+  else leafletMap.setView([39.5,-98.35], 4);
+}
+function buildMap(leads){
+  ensureMap();
+  mapMarkers.forEach(mk => leafletMap.removeLayer(mk));
+  mapMarkers.clear();
+  reviewLeads = leads.slice();
+  reviewIdx = 0;
+  reviewLeads.forEach(Ld => {
+    getZipMetrics(Ld.zipcode, Ld.state).then(m => {
+      Ld._m = m || null;
+      const key = keyOf(Ld);
+      if(m && m.lat!=null && m.lng!=null && !mapMarkers.has(key)){
+        const mk = makeMarker(m.lat, m.lng);
+        mk.on('click', () => { const i = reviewLeads.indexOf(Ld); if(i>=0){ reviewIdx=i; renderReview(); } });
+        mk.addTo(leafletMap);
+        mapMarkers.set(key, mk);
+        if(document.getElementById('mapView').style.display !== 'none') fitMapBounds();
+      }
+      if(Ld === reviewLeads[reviewIdx]) renderReview();
+    }).catch(()=>{});
+  });
+  renderReview();
+}
+function highlightCurrent(){
+  const Ld = reviewLeads[reviewIdx];
+  const curKey = Ld ? keyOf(Ld) : null;
+  let cur = null;
+  mapMarkers.forEach((mk, key) => {
+    const isCur = key === curKey;
+    mk.setStyle({ radius: isCur?11:7, color: isCur?'#111':'#fff', weight: isCur?3:2 });
+    if(isCur) cur = mk;
+  });
+  if(cur){ cur.bringToFront(); leafletMap.panTo(cur.getLatLng(), { animate:true }); }
+}
+function mkChip(text, bg){ return `<span style="padding:1px 6px;border-radius:4px;background:${bg||'#f3f4f6'}">${text}</span>`; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function renderReview(){
+  const panel = document.getElementById('reviewPanel');
+  if(!panel) return;
+  if(!reviewLeads.length){ panel.innerHTML = '<div class="muted small">Drop a leads file to populate the map.</div>'; return; }
+  reviewIdx = Math.min(reviewLeads.length-1, Math.max(0, reviewIdx));
+  const Ld = reviewLeads[reviewIdx];
+  const key = keyOf(Ld);
+  const meta = leadMeta.get(key) || {};
+  const m = Ld._m;
+  let stats;
+  if(m){
+    stats = [
+      'Pending: ' + mkChip(fmtPct(m.pending_pct), colorPending(m.pending_pct)),
+      'Median: '  + mkChip(fmtMoney(m.median_price), colorMedian(m.median_price)),
+      'Active: '  + mkChip(fmtInt(m.active), colorActive(m.active)),
+      'Pop: '     + mkChip(fmtPop(m.pop), colorPop(m.pop))
+    ].join('<br>');
+  } else {
+    stats = '<span class="muted">No market data for this zip</span>';
+  }
+  const cityLine = `${Ld.city}, ${Ld.state} ${Ld.zipcode}` + (Ld.county && Ld.county.trim() ? ` (${Ld.county.toUpperCase()})` : '');
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(Ld.city+', '+Ld.state+' '+Ld.zipcode)}`;
+  const noLoc = !(m && m.lat!=null) ? '<div class="muted small" style="margin-top:6px">No map pin (zip not located)</div>' : '';
+  panel.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+      '<strong>City ' + (reviewIdx+1) + ' of ' + reviewLeads.length + '</strong>' +
+      '<span><button id="rvPrev" class="btn" type="button">&#9666; Prev</button> ' +
+      '<button id="rvNext" class="btn btn-primary" type="button">Next &#9656;</button></span>' +
+    '</div>' +
+    '<div style="font-size:12px;line-height:1.7">' +
+      '<div><strong>Seller:</strong> ' + esc(Ld.seller||'—') + '</div>' +
+      '<div><strong>Address:</strong> ' + esc(Ld.address||'—') + '</div>' +
+      '<div><strong>City/State/Zip:</strong> ' + esc(cityLine) + '</div>' +
+    '</div>' +
+    '<div style="margin:8px 0;font-size:11px;line-height:1.9">' + stats + '</div>' +
+    '<div class="row" style="gap:6px">' +
+      '<a class="pill" href="' + gmaps + '" target="_blank" rel="noopener">Open in Google Maps</a>' +
+      '<button id="rvStart" class="btn btn-primary" type="button">Start search</button>' +
+      '<button id="rvResults" class="btn" type="button">Results</button>' +
+    '</div>' + noLoc;
+  panel.querySelector('#rvPrev').onclick = () => step(-1);
+  panel.querySelector('#rvNext').onclick = () => step(1);
+  panel.querySelector('#rvStart').onclick = () => { if(meta.startBtn) meta.startBtn.click(); };
+  panel.querySelector('#rvResults').onclick = () => { if(meta.searchBtn) meta.searchBtn.click(); };
+  highlightCurrent();
+}
+function step(d){
+  if(!reviewLeads.length) return;
+  reviewIdx = Math.min(reviewLeads.length-1, Math.max(0, reviewIdx + d));
+  renderReview();
+}
+function showTab(which){
+  const isMap = which === 'map';
+  document.getElementById('listView').style.display = isMap ? 'none' : '';
+  document.getElementById('mapView').style.display  = isMap ? '' : 'none';
+  document.getElementById('tabList').classList.toggle('btn-primary', !isMap);
+  document.getElementById('tabMap').classList.toggle('btn-primary', isMap);
+  if(isMap){
+    ensureMap();
+    setTimeout(() => { leafletMap.invalidateSize(); fitMapBounds(); renderReview(); }, 60);
+  }
+}
+document.getElementById('tabList').addEventListener('click', () => showTab('list'));
+document.getElementById('tabMap').addEventListener('click', () => showTab('map'));
+document.addEventListener('keydown', (e) => {
+  if(document.getElementById('mapView').style.display === 'none') return;
+  const tag = (e.target && e.target.tagName) || '';
+  if(tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if(e.key === 'ArrowLeft'){ e.preventDefault(); step(-1); }
+  else if(e.key === 'ArrowRight'){ e.preventDefault(); step(1); }
+});
 </script>
 </body>
-</html>rActive/colo
+</html>
