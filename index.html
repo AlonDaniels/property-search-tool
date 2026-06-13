@@ -1317,8 +1317,8 @@ let reviewIdx = 0;
 function ensureMap(){
   if(leafletMap) return leafletMap;
   leafletMap = L.map('leafletMap', { scrollWheelZoom:true }).setView([39.5,-98.35], 4);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    subdomains:'abcd', maxZoom:19, attribution:'&copy; OpenStreetMap, &copy; CARTO'
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    subdomains:'abcd', maxZoom:20, attribution:'&copy; OpenStreetMap, &copy; CARTO'
   }).addTo(leafletMap);
   return leafletMap;
 }
@@ -1344,26 +1344,30 @@ function buildMap(leads){
       const key = keyOf(Ld);
       if(m && m.lat!=null && m.lng!=null && !mapMarkers.has(key)){
         const mk = makeMarker(m.lat, m.lng);
-        mk.on('click', () => { const i = reviewLeads.indexOf(Ld); if(i>=0){ reviewIdx=i; renderReview(); } });
+        mk.on('click', () => { const i = reviewLeads.indexOf(Ld); if(i>=0){ reviewIdx=i; renderReview(); focusCurrent(); } });
         mk.addTo(leafletMap);
         mapMarkers.set(key, mk);
-        if(document.getElementById('mapView').style.display !== 'none') fitMapBounds();
       }
-      if(Ld === reviewLeads[reviewIdx]) renderReview();
+      if(Ld === reviewLeads[reviewIdx]){ renderReview(); if(document.getElementById('mapView').style.display !== 'none') focusCurrent(); }
     }).catch(()=>{});
   });
   renderReview();
 }
+const FOCUS_ZOOM = 15;
 function highlightCurrent(){
   const Ld = reviewLeads[reviewIdx];
   const curKey = Ld ? keyOf(Ld) : null;
-  let cur = null;
   mapMarkers.forEach((mk, key) => {
     const isCur = key === curKey;
     mk.setStyle({ radius: isCur?11:7, color: isCur?'#111':'#fff', weight: isCur?3:2 });
-    if(isCur) cur = mk;
+    if(isCur) mk.bringToFront();
   });
-  if(cur){ cur.bringToFront(); leafletMap.panTo(cur.getLatLng(), { animate:true }); }
+}
+function focusCurrent(){
+  const Ld = reviewLeads[reviewIdx];
+  if(!Ld) return;
+  const mk = mapMarkers.get(keyOf(Ld));
+  if(mk) leafletMap.setView(mk.getLatLng(), FOCUS_ZOOM, { animate:true });
 }
 function mkChip(text, bg){ return `<span style="padding:1px 6px;border-radius:4px;background:${bg||'#f3f4f6'}">${text}</span>`; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -1434,6 +1438,7 @@ function step(d){
   if(!reviewLeads.length) return;
   reviewIdx = Math.min(reviewLeads.length-1, Math.max(0, reviewIdx + d));
   renderReview();
+  focusCurrent();
 }
 function showTab(which){
   const isMap = which === 'map';
@@ -1443,7 +1448,7 @@ function showTab(which){
   document.getElementById('tabMap').classList.toggle('btn-primary', isMap);
   if(isMap){
     ensureMap();
-    setTimeout(() => { leafletMap.invalidateSize(); fitMapBounds(); renderReview(); }, 60);
+    setTimeout(() => { leafletMap.invalidateSize(); renderReview(); focusCurrent(); }, 60);
   }
 }
 document.getElementById('tabList').addEventListener('click', () => showTab('list'));
