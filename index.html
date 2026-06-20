@@ -194,7 +194,7 @@
         </div>
         <div style="flex:1 1 120px">
           <label>Auto owner lookups (top N)</label>
-          <input id="drawerAutoOwners" value="20" />
+          <input id="drawerAutoOwners" value="10" />
         </div>
       </div>
 
@@ -378,7 +378,10 @@ async function serperSearchMany(query, num){
 }
 
 /** BatchData using working endpoint **/
+const ownerCache = new Map();   // address -> owners[] : avoids paying twice for the same property
 async function batchdataOwners(addr){
+  const ck = JSON.stringify(addr);
+  if(ownerCache.has(ck)) return ownerCache.get(ck);
   const payload={requests:[{address:addr}]};
   const res=await fetch("/api/batchdata",{
     method:"POST",
@@ -390,17 +393,19 @@ async function batchdataOwners(addr){
   });
   if(!res.ok){ throw new Error("BatchData "+res.status+": "+await res.text()); }
   const data=await res.json();
+  let owners=[];
   try{
     const props=(data.results && data.results.properties)||[];
-    if(!props.length) return [];
-    const owner=props[0].owner||{};
-    let owners=[];
-    if(Array.isArray(owner.names)) owners=owner.names.map(n=>n.full).filter(Boolean);
-    if(!owners.length && typeof owner.fullName==="string"){
-      owners=owner.fullName.split(";").map(s=>s.trim()).filter(Boolean);
+    if(props.length){
+      const owner=props[0].owner||{};
+      if(Array.isArray(owner.names)) owners=owner.names.map(n=>n.full).filter(Boolean);
+      if(!owners.length && typeof owner.fullName==="string"){
+        owners=owner.fullName.split(";").map(s=>s.trim()).filter(Boolean);
+      }
     }
-    return owners;
-  }catch{return [];}
+  }catch{ owners=[]; }
+  ownerCache.set(ck, owners);
+  return owners;
 }
 
 /** Address helpers **/
@@ -1116,7 +1121,7 @@ function renderLeadList(leads){
     // Per-lead owners input
     const ownersInput = el("input", {
       type:"number",
-      value:"20",
+      value:"10",
       min:"0",
       style:"width:50px;padding:3px 5px;font-size:11px"
     });
