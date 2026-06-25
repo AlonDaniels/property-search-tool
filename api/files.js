@@ -1,7 +1,7 @@
 // Saved-files API backed by Vercel Blob (private store, OIDC auth).
 // Metadata (id, date range, count) is encoded in the blob pathname so the
 // list view never has to download every file.
-import { list, put, del } from "@vercel/blob";
+import { list, put, del, get } from "@vercel/blob";
 import { checkAuth } from "../lib/auth.js";
 
 const PREFIX = "files/";
@@ -29,9 +29,13 @@ export default async function handler(req, res) {
       }
       const { blobs } = await list({ prefix: `${PREFIX}${id}__` });
       if (!blobs.length) return res.status(404).json({ error: "not found" });
-      const url = blobs[0].downloadUrl || blobs[0].url;
-      const data = await fetch(url).then((r) => r.json());
-      return res.status(200).json(data);
+      // Private blobs aren't fetchable by URL; read content via get().
+      const result = await get(blobs[0].pathname, { access: "private" });
+      if (!result || result.statusCode !== 200)
+        return res.status(404).json({ error: "not found" });
+      const text = await new Response(result.stream).text();
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.status(200).json(JSON.parse(text));
     }
 
     if (req.method === "POST" || req.method === "PUT") {
