@@ -1574,9 +1574,26 @@ async function refreshSavedFiles(){
     wrap.innerHTML = '';
     files.forEach(f=>{
       const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
-      const btn = el('button', { class:"finder", style:"width:100%;justify-content:flex-start;margin:3px 0", text: `${title}  ·  ${f.count} leads` });
+      const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0" });
+      const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
       btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
-      wrap.appendChild(btn);
+      const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
+      delBtn.addEventListener('click', ()=>{
+        row.innerHTML = '';
+        const q = el('span', { class:"small", style:"flex:1", text:`Delete "${title}"?` });
+        const yes = el('button', { class:"finder", style:"background:#dc2626;color:#fff;border-color:#dc2626;flex:0 0 auto", text:"Delete" });
+        const no = el('button', { class:"finder", style:"flex:0 0 auto", text:"Cancel" });
+        yes.addEventListener('click', async ()=>{
+          yes.disabled = true; no.disabled = true; yes.textContent = "Deleting…";
+          try{ await apiFiles("DELETE", { id: f.id }); }
+          catch(e){ ingestStatus.textContent = "Delete failed: "+e.message; }
+          refreshSavedFiles().catch(console.error);
+        });
+        no.addEventListener('click', ()=> refreshSavedFiles().catch(console.error));
+        row.appendChild(q); row.appendChild(yes); row.appendChild(no);
+      });
+      row.appendChild(btn); row.appendChild(delBtn);
+      wrap.appendChild(row);
     });
   }catch(e){ wrap.innerHTML = '<div class="error small">Could not load saved files: '+esc(e.message)+'</div>'; }
 }
