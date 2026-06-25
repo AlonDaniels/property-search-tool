@@ -1574,7 +1574,7 @@ async function refreshSavedFiles(){
     wrap.innerHTML = '';
     files.forEach(f=>{
       const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
-      const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0" });
+      const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
       const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
       btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
       const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
