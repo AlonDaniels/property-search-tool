@@ -1,10 +1,13 @@
 // Serverless proxy for BatchData. The token lives in the BATCHDATA_TOKEN
 // environment variable on Vercel and is never sent to the browser.
+import { checkAuth } from "../lib/auth.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed. Use POST." });
   }
+  if (!checkAuth(req)) return res.status(401).json({ error: "unauthorized" });
 
   const token = process.env.BATCHDATA_TOKEN;
   if (!token) {
@@ -14,7 +17,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // The page sends the full BatchData payload, e.g. { requests: [{ address }] }
     const upstream = await fetch(
       "https://api.batchdata.com/api/v1/property/lookup/all-attributes",
       {

@@ -1,10 +1,13 @@
 // Serverless proxy for Serper. The API key lives in the SERPER_API_KEY
 // environment variable on Vercel and is never sent to the browser.
+import { checkAuth } from "../lib/auth.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed. Use POST." });
   }
+  if (!checkAuth(req)) return res.status(401).json({ error: "unauthorized" });
 
   const key = process.env.SERPER_API_KEY;
   if (!key) {
@@ -14,7 +17,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Forward whatever payload the page sent (q, num, page, gl, hl, type, ...)
     const upstream = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: {
