@@ -104,6 +104,18 @@
 <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBLN-krGRumHCk0La1p8XlFBMQOCIDtpHs&loading=async&callback=__gmapsInit"></script>
 </head>
 <body>
+<div id="authGate" style="position:fixed;inset:0;z-index:1000;background:linear-gradient(135deg,#7e3ff2,#ff6a3d);display:flex;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:26px 24px;width:320px;box-shadow:0 20px 60px rgba(0,0,0,.28)">
+    <h2 style="margin:0 0 2px">Sign in</h2>
+    <p class="small muted" style="margin:0 0 14px">Enter your team credentials to continue.</p>
+    <label>Username</label>
+    <input id="gateUser" type="text" autocomplete="username" />
+    <label style="margin-top:8px">Password</label>
+    <input id="gatePass" type="password" autocomplete="current-password" />
+    <div id="gateErr" class="error small" style="margin-top:8px;min-height:16px"></div>
+    <button id="gateBtn" class="btn btn-primary" type="button" style="width:100%;justify-content:center;margin-top:4px">Enter</button>
+  </div>
+</div>
 <header>
   <div class="inner">
     <div>
@@ -124,6 +136,12 @@
       </div>
       <input type="file" id="fileInput" accept=".html,.htm" />
       <div class="small muted" id="ingestStatus">No file loaded.</div>
+    </div>
+
+    <div class="card panel">
+      <h2>Saved files</h2>
+      <p>Every uploaded list is saved here (titled by its row dates). Click one to reload its leads and saved owners.</p>
+      <div id="savedFilesList"><div class="muted small">Sign in to load.</div></div>
     </div>
 
     <div id="tabBar" class="row" style="margin:2px 0 8px">
@@ -229,6 +247,10 @@
 
 /** Pending % / market data (bundled static JSON, served from /data) **/
 const PENDING_DATA_BASE = "/data";
+
+/** Password-gate credentials (set after login) + auth header helper **/
+const APP = { user: "", pass: "" };
+function authHeaders(){ return { "x-app-user": APP.user, "x-app-pass": APP.pass }; }
 const STATE_ABBR_TO_NAME = {AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",DC:"District of Columbia",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming"};
 const stateDataCache = new Map(); // STATE -> { latestMonth, byZip: Map<zip, row> } | "error"
 const stateDataInflight = new Map(); // STATE -> Promise
@@ -358,7 +380,7 @@ async function serperSearchMany(query, num){
     const payload={q:query, num:resultsPerPage, gl:"us", hl:"en", type:"search", page};
   const res=await fetch("/api/serper",{
     method:"POST",
-    headers:{"Content-Type":"application/json"},
+    headers:{"Content-Type":"application/json", ...authHeaders()},
     body:JSON.stringify(payload)
   });
   if(!res.ok) throw new Error("Serper error "+res.status);
@@ -387,7 +409,8 @@ async function batchdataOwners(addr){
     method:"POST",
     headers:{
       "Accept":"application/json",
-      "Content-Type":"application/json"
+      "Content-Type":"application/json",
+      ...authHeaders()
     },
     body:JSON.stringify(payload)
   });
@@ -405,6 +428,7 @@ async function batchdataOwners(addr){
     }
   }catch{ owners=[]; }
   ownerCache.set(ck, owners);
+  scheduleOwnerSave();
   return owners;
 }
 
@@ -880,6 +904,7 @@ async function handleFiles(files){
   }
   ingestStatus.textContent=`Parsed ${leads.length} lead(s).`;
   renderLeadList(leads);
+  saveUploadedFile(leads).catch(e=>{ ingestStatus.textContent = "Saved locally, but cloud save failed: "+e.message; });
 }
 
 function extractLeadsFromMotivatedSellersHTML(htmlText){
@@ -900,9 +925,10 @@ function extractLeadsFromMotivatedSellersHTML(htmlText){
     const state   = (tds[5].textContent || "").trim();
     const zipcode = (tds[6].textContent || "").trim();
     const county  = (tds[7]?.textContent || "").trim();
+    const received = (tds[8]?.textContent || "").trim();
 
     if (address && city && state && zipcode) {
-      leads.push({ seller, phone, email, address, city, state, zipcode, county });
+      leads.push({ seller, phone, email, address, city, state, zipcode, county, received });
     }
   });
 
@@ -921,7 +947,7 @@ function extractLeadsFromMotivatedSellersHTML(htmlText){
     const city    = m[2].trim();
     const state   = m[3].trim();
     const zipcode = m[4].trim();
-    leads.push({ seller:"", phone:"", email:"", address, city, state, zipcode, county:"" });
+    leads.push({ seller:"", phone:"", email:"", address, city, state, zipcode, county:"", received:"" });
   }
   return leads;
 }
@@ -1472,6 +1498,112 @@ document.addEventListener('keydown', (e) => {
   if(e.key === 'ArrowLeft'){ e.preventDefault(); step(-1); }
   else if(e.key === 'ArrowRight'){ e.preventDefault(); step(1); }
 });
+
+/* ===== Password gate + saved files (Vercel Blob) ===== */
+let currentFile = null;        // { id, dateMin, dateMax, count, leads }
+let ownerSaveTimer = null;
+
+const MON = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+const MON_NAMES = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function parseReceived(s){
+  if(!s) return null;
+  const m = String(s).trim().match(/([A-Za-z]{3})\D+(\d{1,2})\D+(\d{2,4})/);
+  if(!m) return null;
+  const mon = MON[m[1].toLowerCase()]; if(!mon) return null;
+  let yr = parseInt(m[3],10); if(yr < 100) yr += 2000;
+  return yr*10000 + mon*100 + parseInt(m[2],10);
+}
+function dnum(n){ return { y: Math.floor(n/10000), m: Math.floor(n/100)%100, d: n%100 }; }
+function fmtDate1(n){ const x=dnum(n); return `${MON_NAMES[x.m]} ${x.d}, ${x.y}`; }
+function dateRangeTitle(min, max){
+  if(!min && !max) return "Undated";
+  if(!max) max=min; if(!min) min=max;
+  if(min===max) return fmtDate1(min);
+  const a=dnum(min), b=dnum(max);
+  if(a.y===b.y && a.m===b.m) return `${MON_NAMES[a.m]} ${a.d}–${b.d}, ${a.y}`;
+  if(a.y===b.y) return `${MON_NAMES[a.m]} ${a.d} – ${MON_NAMES[b.m]} ${b.d}, ${a.y}`;
+  return `${fmtDate1(min)} – ${fmtDate1(max)}`;
+}
+function leadsMeta(leads){
+  const nums = leads.map(L=>parseReceived(L.received)).filter(n=>n!=null);
+  const lo = nums.length ? Math.min(...nums) : 0;
+  const hi = nums.length ? Math.max(...nums) : 0;
+  return { dateMin: String(lo).padStart(8,'0'), dateMax: String(hi).padStart(8,'0'), count: leads.length };
+}
+
+async function apiFiles(method, opts={}){
+  const url = "/api/files" + (opts.id ? ("?id="+encodeURIComponent(opts.id)) : "");
+  const init = { method, headers: { ...authHeaders() } };
+  if(opts.body){ init.headers["Content-Type"]="application/json"; init.body = JSON.stringify(opts.body); }
+  const r = await fetch(url, init);
+  if(r.status === 401) throw new Error("unauthorized");
+  if(!r.ok) throw new Error("files "+r.status);
+  return r.json();
+}
+
+async function saveUploadedFile(leads){
+  const meta = leadsMeta(leads);
+  const id = "f" + Date.now().toString(36);
+  currentFile = { id, dateMin: meta.dateMin, dateMax: meta.dateMax, count: meta.count, leads };
+  await apiFiles("POST", { body: { ...currentFile, uploadedAt: new Date().toISOString(), owners: {} } });
+  refreshSavedFiles().catch(console.error);
+}
+function scheduleOwnerSave(){
+  if(!currentFile) return;
+  clearTimeout(ownerSaveTimer);
+  ownerSaveTimer = setTimeout(()=>{
+    const owners = {}; ownerCache.forEach((v,k)=>{ owners[k]=v; });
+    apiFiles("PUT", { body: { ...currentFile, owners, uploadedAt: new Date().toISOString() } }).catch(console.error);
+  }, 1500);
+}
+async function openSavedFile(id){
+  const data = await apiFiles("GET", { id });
+  currentFile = { id: data.id, dateMin: data.dateMin, dateMax: data.dateMax, count: data.count, leads: data.leads||[] };
+  if(data.owners) Object.entries(data.owners).forEach(([k,v])=> ownerCache.set(k, v));
+  ingestStatus.textContent = `Loaded saved file — ${(data.leads||[]).length} leads, ${Object.keys(data.owners||{}).length} saved owner lookups.`;
+  renderLeadList(data.leads || []);
+}
+
+async function refreshSavedFiles(){
+  const wrap = document.getElementById('savedFilesList');
+  if(!wrap) return;
+  wrap.innerHTML = '<div class="muted small">Loading…</div>';
+  try{
+    const { files } = await apiFiles("GET", {});
+    if(!files.length){ wrap.innerHTML = '<div class="muted small">No saved files yet.</div>'; return; }
+    wrap.innerHTML = '';
+    files.forEach(f=>{
+      const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
+      const btn = el('button', { class:"finder", style:"width:100%;justify-content:flex-start;margin:3px 0", text: `${title}  ·  ${f.count} leads` });
+      btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
+      wrap.appendChild(btn);
+    });
+  }catch(e){ wrap.innerHTML = '<div class="error small">Could not load saved files: '+esc(e.message)+'</div>'; }
+}
+
+async function tryLogin(){
+  const u = document.getElementById('gateUser').value.trim();
+  const p = document.getElementById('gatePass').value;
+  const errEl = document.getElementById('gateErr');
+  errEl.textContent = "";
+  APP.user = u; APP.pass = p;
+  try{
+    await apiFiles("GET", {});
+    try{ sessionStorage.setItem('ps_user', u); sessionStorage.setItem('ps_pass', p); }catch(_){}
+    document.getElementById('authGate').style.display = 'none';
+    refreshSavedFiles().catch(console.error);
+  }catch(e){
+    APP.user=""; APP.pass="";
+    errEl.textContent = (e.message==="unauthorized") ? "Wrong username or password." : ("Error: "+e.message);
+  }
+}
+(function initGate(){
+  let u="",p="";
+  try{ u = sessionStorage.getItem('ps_user')||""; p = sessionStorage.getItem('ps_pass')||""; }catch(_){}
+  document.getElementById('gateBtn').addEventListener('click', tryLogin);
+  document.getElementById('gatePass').addEventListener('keydown', e=>{ if(e.key==='Enter') tryLogin(); });
+  if(u && p){ document.getElementById('gateUser').value=u; document.getElementById('gatePass').value=p; tryLogin(); }
+})();
 </script>
 </body>
 </html>
