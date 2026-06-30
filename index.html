@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: delete-button + max-width 480 -->
+<!-- build: scrollable-saved-list + persist-search-state -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -142,7 +142,7 @@
     <div class="card panel">
       <h2>Saved files</h2>
       <p>Every uploaded list is saved here (titled by its row dates). Click one to reload its leads and saved owners.</p>
-      <div id="savedFilesList"><div class="muted small">Sign in to load.</div></div>
+      <div id="savedFilesList" style="max-height:240px;overflow-y:auto"><div class="muted small">Sign in to load.</div></div>
     </div>
 
     <div id="tabBar" class="row" style="margin:2px 0 8px">
@@ -429,7 +429,7 @@ async function batchdataOwners(addr){
     }
   }catch{ owners=[]; }
   ownerCache.set(ck, owners);
-  scheduleOwnerSave();
+  scheduleSave();
   return owners;
 }
 
@@ -661,6 +661,7 @@ async function runSearch(leadKeyForSearch = null){
       }
     }
   }
+  scheduleSave();
 }
 
 function loadSearchResults(leadKey) {
@@ -1074,6 +1075,7 @@ function renderLeadList(leads){
   leadBody.innerHTML="";
   // No longer using global controls - each lead has its own
   leadMeta.clear();
+  searchResults.clear();
 
   const excludedStates = ["SC"];
 
@@ -1176,6 +1178,7 @@ function renderLeadList(leads){
 
     doneBtn.addEventListener("click", ()=>{
       tr.classList.toggle("checked");
+      scheduleSave();
     });
 
     startSearchBtn.addEventListener("click", async ()=>{
@@ -1549,20 +1552,60 @@ async function saveUploadedFile(leads){
   await apiFiles("POST", { body: { ...currentFile, uploadedAt: new Date().toISOString(), owners: {} } });
   refreshSavedFiles().catch(console.error);
 }
-function scheduleOwnerSave(){
+function collectState(){
+  const owners = {}; ownerCache.forEach((v,k)=>{ owners[k]=v; });
+  const search = {};
+  searchResults.forEach((st, leadKey)=>{
+    search[leadKey] = {
+      items: st.items || [],
+      owners: st.owners ? Object.fromEntries(st.owners) : {},
+      ownersFetched: st.ownersFetched || 0,
+      topN: st.topN || 0,
+      status: st.status || ""
+    };
+  });
+  const checked = [];
+  leadMeta.forEach((meta, leadKey)=>{ if(meta && meta.row && meta.row.classList.contains('checked')) checked.push(leadKey); });
+  return { owners, search, checked };
+}
+function scheduleSave(){
   if(!currentFile) return;
   clearTimeout(ownerSaveTimer);
   ownerSaveTimer = setTimeout(()=>{
-    const owners = {}; ownerCache.forEach((v,k)=>{ owners[k]=v; });
-    apiFiles("PUT", { body: { ...currentFile, owners, uploadedAt: new Date().toISOString() } }).catch(console.error);
+    const { owners, search, checked } = collectState();
+    apiFiles("PUT", { body: { ...currentFile, owners, search, checked, uploadedAt: new Date().toISOString() } }).catch(console.error);
   }, 1500);
 }
 async function openSavedFile(id){
   const data = await apiFiles("GET", { id });
   currentFile = { id: data.id, dateMin: data.dateMin, dateMax: data.dateMax, count: data.count, leads: data.leads||[] };
+  ownerCache.clear();
   if(data.owners) Object.entries(data.owners).forEach(([k,v])=> ownerCache.set(k, v));
   ingestStatus.textContent = `Loaded saved file — ${(data.leads||[]).length} leads, ${Object.keys(data.owners||{}).length} saved owner lookups.`;
   renderLeadList(data.leads || []);
+  // Restore prior search results + row colors (search-done / checked / Results ✓)
+  const search = data.search || {};
+  Object.entries(search).forEach(([leadKey, st])=>{
+    const meta = leadMeta.get(leadKey);
+    const sellerPrefixes = meta ? extractSellerPrefixes(meta.seller||"") : [];
+    searchResults.set(leadKey, {
+      items: st.items || [],
+      owners: new Map(Object.entries(st.owners||{})),
+      ownersFetched: st.ownersFetched || 0,
+      topN: st.topN || 0,
+      status: st.status || "",
+      progress: 100,
+      sellerPrefixes
+    });
+    if(meta){
+      if(meta.searchBtn){ meta.searchBtn.classList.add("complete"); meta.searchBtn.textContent = "Results ✓"; }
+      if(meta.row){ meta.row.classList.add("search-done"); }
+    }
+  });
+  (data.checked || []).forEach(leadKey=>{
+    const meta = leadMeta.get(leadKey);
+    if(meta && meta.row) meta.row.classList.add("checked");
+  });
 }
 
 async function refreshSavedFiles(){
