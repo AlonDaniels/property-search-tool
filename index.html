@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: scrollable-saved-list + persist-search-state -->
+<!-- build: sort+paginate saved list, low-op saves -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -142,7 +142,7 @@
     <div class="card panel">
       <h2>Saved files</h2>
       <p>Every uploaded list is saved here (titled by its row dates). Click one to reload its leads and saved owners.</p>
-      <div id="savedFilesList" style="max-height:240px;overflow-y:auto"><div class="muted small">Sign in to load.</div></div>
+      <div id="savedFilesList" style="max-height:440px;overflow-y:auto"><div class="muted small">Sign in to load.</div></div>
     </div>
 
     <div id="tabBar" class="row" style="margin:2px 0 8px">
@@ -1568,14 +1568,22 @@ function collectState(){
   leadMeta.forEach((meta, leadKey)=>{ if(meta && meta.row && meta.row.classList.contains('checked')) checked.push(leadKey); });
   return { owners, search, checked };
 }
+function doSave(keepalive){
+  if(!currentFile) return;
+  const { owners, search, checked } = collectState();
+  const body = JSON.stringify({ ...currentFile, owners, search, checked, uploadedAt: new Date().toISOString() });
+  fetch("/api/files", { method:"PUT", headers:{ ...authHeaders(), "Content-Type":"application/json" }, body, keepalive: !!keepalive }).catch(()=>{});
+}
+// Debounced to keep Vercel Blob "advanced operation" usage low: many rapid
+// changes (owner lookups, searches) collapse into ONE write every 15s, and a
+// final write fires when the tab is hidden/closed so nothing is lost.
 function scheduleSave(){
   if(!currentFile) return;
   clearTimeout(ownerSaveTimer);
-  ownerSaveTimer = setTimeout(()=>{
-    const { owners, search, checked } = collectState();
-    apiFiles("PUT", { body: { ...currentFile, owners, search, checked, uploadedAt: new Date().toISOString() } }).catch(console.error);
-  }, 1500);
+  ownerSaveTimer = setTimeout(()=> doSave(false), 15000);
 }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ clearTimeout(ownerSaveTimer); doSave(true); } });
+window.addEventListener('pagehide', ()=>{ clearTimeout(ownerSaveTimer); doSave(true); });
 async function openSavedFile(id){
   const data = await apiFiles("GET", { id });
   currentFile = { id: data.id, dateMin: data.dateMin, dateMax: data.dateMax, count: data.count, leads: data.leads||[] };
@@ -1608,38 +1616,67 @@ async function openSavedFile(id){
   });
 }
 
+let savedFilesCache = [];
+let savedPage = 0;
+const SAVED_PER_PAGE = 10;
 async function refreshSavedFiles(){
   const wrap = document.getElementById('savedFilesList');
   if(!wrap) return;
   wrap.innerHTML = '<div class="muted small">Loading…</div>';
   try{
     const { files } = await apiFiles("GET", {});
-    if(!files.length){ wrap.innerHTML = '<div class="muted small">No saved files yet.</div>'; return; }
-    wrap.innerHTML = '';
-    files.forEach(f=>{
-      const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
-      const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
-      const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
-      btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
-      const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
-      delBtn.addEventListener('click', ()=>{
-        row.innerHTML = '';
-        const q = el('span', { class:"small", style:"flex:1", text:`Delete "${title}"?` });
-        const yes = el('button', { class:"finder", style:"background:#dc2626;color:#fff;border-color:#dc2626;flex:0 0 auto", text:"Delete" });
-        const no = el('button', { class:"finder", style:"flex:0 0 auto", text:"Cancel" });
-        yes.addEventListener('click', async ()=>{
-          yes.disabled = true; no.disabled = true; yes.textContent = "Deleting…";
-          try{ await apiFiles("DELETE", { id: f.id }); }
-          catch(e){ ingestStatus.textContent = "Delete failed: "+e.message; }
-          refreshSavedFiles().catch(console.error);
-        });
-        no.addEventListener('click', ()=> refreshSavedFiles().catch(console.error));
-        row.appendChild(q); row.appendChild(yes); row.appendChild(no);
-      });
-      row.appendChild(btn); row.appendChild(delBtn);
-      wrap.appendChild(row);
-    });
+    // Sort by the row dates (newest first), tie-break on start date.
+    files.sort((a,b)=> (Number(b.dateMax)-Number(a.dateMax)) || (Number(b.dateMin)-Number(a.dateMin)));
+    savedFilesCache = files;
+    savedPage = 0;
+    renderSavedPage();
   }catch(e){ wrap.innerHTML = '<div class="error small">Could not load saved files: '+esc(e.message)+'</div>'; }
+}
+function renderSavedPage(){
+  const wrap = document.getElementById('savedFilesList');
+  if(!wrap) return;
+  const files = savedFilesCache;
+  if(!files.length){ wrap.innerHTML = '<div class="muted small">No saved files yet.</div>'; return; }
+  const pages = Math.max(1, Math.ceil(files.length / SAVED_PER_PAGE));
+  if(savedPage > pages-1) savedPage = pages-1;
+  if(savedPage < 0) savedPage = 0;
+  const start = savedPage * SAVED_PER_PAGE;
+  const slice = files.slice(start, start + SAVED_PER_PAGE);
+  wrap.innerHTML = '';
+  slice.forEach(f=>{
+    const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
+    const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
+    const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
+    btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
+    const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
+    delBtn.addEventListener('click', ()=>{
+      row.innerHTML = '';
+      const q = el('span', { class:"small", style:"flex:1", text:`Delete "${title}"?` });
+      const yes = el('button', { class:"finder", style:"background:#dc2626;color:#fff;border-color:#dc2626;flex:0 0 auto", text:"Delete" });
+      const no = el('button', { class:"finder", style:"flex:0 0 auto", text:"Cancel" });
+      yes.addEventListener('click', async ()=>{
+        yes.disabled = true; no.disabled = true; yes.textContent = "Deleting…";
+        try{ await apiFiles("DELETE", { id: f.id }); savedFilesCache = savedFilesCache.filter(x=>x.id!==f.id); }
+        catch(e){ ingestStatus.textContent = "Delete failed: "+e.message; }
+        renderSavedPage();
+      });
+      no.addEventListener('click', ()=> renderSavedPage());
+      row.appendChild(q); row.appendChild(yes); row.appendChild(no);
+    });
+    row.appendChild(btn); row.appendChild(delBtn);
+    wrap.appendChild(row);
+  });
+  if(pages > 1){
+    const nav = el('div', { style:"display:flex;align-items:center;gap:8px;margin-top:8px;max-width:480px" });
+    const prev = el('button', { class:"btn small", text:"‹ Prev" });
+    const next = el('button', { class:"btn small", text:"Next ›" });
+    prev.disabled = savedPage===0; next.disabled = savedPage>=pages-1;
+    prev.addEventListener('click', ()=>{ savedPage--; renderSavedPage(); });
+    next.addEventListener('click', ()=>{ savedPage++; renderSavedPage(); });
+    const label = el('span', { class:"small muted", text:`Page ${savedPage+1} / ${pages} · ${files.length} files` });
+    nav.appendChild(prev); nav.appendChild(next); nav.appendChild(label);
+    wrap.appendChild(nav);
+  }
 }
 
 async function tryLogin(){
