@@ -47,11 +47,10 @@ export default async function handler(req, res) {
         count: body.count || 0,
       };
       if (!meta.id) return res.status(400).json({ error: "missing id" });
-      // drop any stale blob for this id whose metadata-pathname differs
-      const { blobs } = await list({ prefix: `${PREFIX}${meta.id}__` });
-      const target = pathnameFor(meta);
-      for (const b of blobs) if (b.pathname !== target) await del(b.url);
-      await put(target, JSON.stringify(body), {
+      // Deterministic pathname per id (dateMin/dateMax/count are fixed at
+      // upload time), so a plain overwrite is enough — no list()/del() needed.
+      // This keeps each save to a SINGLE Blob "advanced operation".
+      await put(pathnameFor(meta), JSON.stringify(body), {
         access: "private",
         addRandomSuffix: false,
         allowOverwrite: true,
