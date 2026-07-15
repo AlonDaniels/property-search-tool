@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: flush-on-switch saves + duplicate-title numbering -->
+<!-- build: steady autosave+retry, save-status, active-file highlight -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -140,7 +140,7 @@
     </div>
 
     <div class="card panel">
-      <h2>Saved files</h2>
+      <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px">Saved files <span id="saveStatus" class="small" style="font-weight:400;color:#6b7280"></span></h2>
       <p>Every uploaded list is saved here (titled by its row dates). Click one to reload its leads and saved owners.</p>
       <div id="savedFilesList" style="max-height:440px;overflow-y:auto"><div class="muted small">Sign in to load.</div></div>
     </div>
@@ -1570,35 +1570,55 @@ function collectState(){
   leadMeta.forEach((meta, leadKey)=>{ if(meta && meta.row && meta.row.classList.contains('checked')) checked.push(leadKey); });
   return { owners, search, checked };
 }
-// Snapshot the CURRENT file's state and PUT it. Returns a promise so callers
-// can await a full write before switching files.
+let savingNow = false;
+function setSaveStatus(txt, kind){
+  const s = document.getElementById('saveStatus');
+  if(!s) return;
+  s.textContent = txt;
+  s.style.color = kind==='err' ? '#dc2626' : (kind==='ok' ? '#16a34a' : '#6b7280');
+}
+// Snapshot the CURRENT file's state and PUT it. Returns a promise that rejects
+// on any non-OK response so the caller can retry.
 function doSave(keepalive){
   if(!currentFile) return Promise.resolve();
   const { owners, search, checked } = collectState();
   const body = JSON.stringify({ ...currentFile, owners, search, checked, uploadedAt: new Date().toISOString() });
   return fetch("/api/files", { method:"PUT", headers:{ ...authHeaders(), "Content-Type":"application/json" }, body, keepalive: !!keepalive })
-    .then(r=>{ if(!r.ok) throw new Error("save "+r.status); })
-    .catch(e=>{ console.error("save failed", e); throw e; });
+    .then(r=>{ if(!r.ok) throw new Error("save "+r.status); });
 }
-// Debounced to keep Blob "advanced operation" usage low: rapid changes (owner
-// lookups, searches, Done clicks) collapse into ONE write. Every schedule sets
-// a dirty flag so we can force-flush before the file is swapped out.
-function scheduleSave(){
-  if(!currentFile) return;
-  pendingSave = true;
-  clearTimeout(ownerSaveTimer);
-  ownerSaveTimer = setTimeout(()=>{ pendingSave = false; doSave(false).catch(()=>{}); }, 8000);
+// Any change just flags the file dirty. A STEADY timer does the real writing so
+// a save is guaranteed even during continuous activity, and a failed write
+// stays dirty so the next tick RETRIES it (no silent data loss).
+function scheduleSave(){ if(currentFile){ pendingSave = true; setSaveStatus('Unsaved changes…'); } }
+async function saveTick(){
+  if(savingNow || !pendingSave || !currentFile) return;
+  savingNow = true;
+  pendingSave = false;                 // clear first; if changes arrive mid-save they re-flag
+  setSaveStatus('Saving…');
+  try{
+    await doSave(false);
+    setSaveStatus(pendingSave ? 'Saving…' : 'All changes saved ✓', pendingSave ? '' : 'ok');
+  }catch(e){
+    pendingSave = true;                 // keep dirty → retry next tick
+    setSaveStatus('Save failed — will retry', 'err');
+    console.error('save failed', e);
+  }finally{ savingNow = false; }
 }
-// Immediately write any queued changes for the current file (awaitable). Call
-// this BEFORE loading a different file / uploading a new one, so nothing is lost.
+setInterval(saveTick, 5000);
+// Force-write any queued changes now (awaitable). Called before switching files.
 async function flushSave(){
+  for(let i=0;i<30 && savingNow;i++){ await new Promise(r=>setTimeout(r,100)); }
   if(!pendingSave || !currentFile) return;
-  pendingSave = false;
-  clearTimeout(ownerSaveTimer);
-  try{ await doSave(false); }catch(_){ /* logged in doSave */ }
+  savingNow = true; pendingSave = false;
+  setSaveStatus('Saving…');
+  try{ await doSave(false); setSaveStatus('All changes saved ✓','ok'); }
+  catch(e){ pendingSave = true; setSaveStatus('Save failed — will retry','err'); console.error('save failed', e); }
+  finally{ savingNow = false; }
 }
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden' && pendingSave){ pendingSave=false; clearTimeout(ownerSaveTimer); doSave(false).catch(()=>{}); } });
-window.addEventListener('pagehide', ()=>{ if(pendingSave){ pendingSave=false; clearTimeout(ownerSaveTimer); doSave(true).catch(()=>{}); } });
+// Best-effort final write when leaving the tab (kept dirty so if the page
+// survives, the steady timer still retries).
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden' && pendingSave && currentFile) doSave(true).catch(()=>{}); });
+window.addEventListener('pagehide', ()=>{ if(pendingSave && currentFile) doSave(true).catch(()=>{}); });
 async function openSavedFile(id){
   await flushSave();  // persist the file we're leaving before loading a new one
   const data = await apiFiles("GET", { id });
@@ -1630,6 +1650,13 @@ async function openSavedFile(id){
     const meta = leadMeta.get(leadKey);
     if(meta && meta.row) meta.row.classList.add("checked");
   });
+  setSaveStatus('');
+  // Reflect the now-open file in the saved list: jump to its page + highlight it.
+  if(savedFilesCache.length){
+    const idx = savedFilesCache.findIndex(x=>x.id===currentFile.id);
+    if(idx>=0){ savedPage = Math.floor(idx / SAVED_PER_PAGE); }
+  }
+  renderSavedPage();
 }
 
 let savedFilesCache = [];
@@ -1672,8 +1699,10 @@ function renderSavedPage(){
   slice.forEach(f=>{
     const base = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
     const title = f._dispNum ? `${base}  (#${f._dispNum})` : base;
+    const isActive = currentFile && f.id === currentFile.id;
     const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
-    const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
+    const btnStyle = "flex:1;justify-content:flex-start" + (isActive ? ";background:#e0e7ff;border-color:#6366f1;color:#3730a3" : "");
+    const btn = el('button', { class:"finder", style:btnStyle, text: (isActive ? "▶ " : "") + `${title}  ·  ${f.count} leads` + (isActive ? "   — open" : "") });
     btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
     const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
     delBtn.addEventListener('click', ()=>{
