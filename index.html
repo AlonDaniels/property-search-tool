@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: sort+paginate saved list, low-op saves -->
+<!-- build: flush-on-switch saves + duplicate-title numbering -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -896,6 +896,7 @@ fileInput.addEventListener("change", (e)=> handleFiles(e.target.files));
 
 async function handleFiles(files){
   if(!files || !files.length) return;
+  await flushSave();  // persist any open file before replacing it
   const f=files[0];
   ingestStatus.textContent=`Reading ${f.name}…`;
   const txt=await f.text();
@@ -1506,6 +1507,7 @@ document.addEventListener('keydown', (e) => {
 /* ===== Password gate + saved files (Vercel Blob) ===== */
 let currentFile = null;        // { id, dateMin, dateMax, count, leads }
 let ownerSaveTimer = null;
+let pendingSave = false;       // true when there are unsaved changes queued
 
 const MON = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
 const MON_NAMES = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -1568,23 +1570,37 @@ function collectState(){
   leadMeta.forEach((meta, leadKey)=>{ if(meta && meta.row && meta.row.classList.contains('checked')) checked.push(leadKey); });
   return { owners, search, checked };
 }
+// Snapshot the CURRENT file's state and PUT it. Returns a promise so callers
+// can await a full write before switching files.
 function doSave(keepalive){
-  if(!currentFile) return;
+  if(!currentFile) return Promise.resolve();
   const { owners, search, checked } = collectState();
   const body = JSON.stringify({ ...currentFile, owners, search, checked, uploadedAt: new Date().toISOString() });
-  fetch("/api/files", { method:"PUT", headers:{ ...authHeaders(), "Content-Type":"application/json" }, body, keepalive: !!keepalive }).catch(()=>{});
+  return fetch("/api/files", { method:"PUT", headers:{ ...authHeaders(), "Content-Type":"application/json" }, body, keepalive: !!keepalive })
+    .then(r=>{ if(!r.ok) throw new Error("save "+r.status); })
+    .catch(e=>{ console.error("save failed", e); throw e; });
 }
-// Debounced to keep Vercel Blob "advanced operation" usage low: many rapid
-// changes (owner lookups, searches) collapse into ONE write every 15s, and a
-// final write fires when the tab is hidden/closed so nothing is lost.
+// Debounced to keep Blob "advanced operation" usage low: rapid changes (owner
+// lookups, searches, Done clicks) collapse into ONE write. Every schedule sets
+// a dirty flag so we can force-flush before the file is swapped out.
 function scheduleSave(){
   if(!currentFile) return;
+  pendingSave = true;
   clearTimeout(ownerSaveTimer);
-  ownerSaveTimer = setTimeout(()=> doSave(false), 15000);
+  ownerSaveTimer = setTimeout(()=>{ pendingSave = false; doSave(false).catch(()=>{}); }, 8000);
 }
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ clearTimeout(ownerSaveTimer); doSave(true); } });
-window.addEventListener('pagehide', ()=>{ clearTimeout(ownerSaveTimer); doSave(true); });
+// Immediately write any queued changes for the current file (awaitable). Call
+// this BEFORE loading a different file / uploading a new one, so nothing is lost.
+async function flushSave(){
+  if(!pendingSave || !currentFile) return;
+  pendingSave = false;
+  clearTimeout(ownerSaveTimer);
+  try{ await doSave(false); }catch(_){ /* logged in doSave */ }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden' && pendingSave){ pendingSave=false; clearTimeout(ownerSaveTimer); doSave(false).catch(()=>{}); } });
+window.addEventListener('pagehide', ()=>{ if(pendingSave){ pendingSave=false; clearTimeout(ownerSaveTimer); doSave(true).catch(()=>{}); } });
 async function openSavedFile(id){
+  await flushSave();  // persist the file we're leaving before loading a new one
   const data = await apiFiles("GET", { id });
   currentFile = { id: data.id, dateMin: data.dateMin, dateMax: data.dateMax, count: data.count, leads: data.leads||[] };
   ownerCache.clear();
@@ -1627,6 +1643,16 @@ async function refreshSavedFiles(){
     const { files } = await apiFiles("GET", {});
     // Sort by the row dates (newest first), tie-break on start date.
     files.sort((a,b)=> (Number(b.dateMax)-Number(a.dateMax)) || (Number(b.dateMin)-Number(a.dateMin)));
+    // Number files that share the same date title (#1 = earliest uploaded) so
+    // duplicates are easy to tell apart.
+    const groups = {};
+    files.forEach(f=>{ const t = dateRangeTitle(Number(f.dateMin), Number(f.dateMax)); (groups[t] = groups[t] || []).push(f); });
+    Object.values(groups).forEach(g=>{
+      if(g.length > 1){
+        g.slice().sort((a,b)=> String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')))
+          .forEach((f,i)=>{ f._dispNum = i+1; });
+      } else { g[0]._dispNum = 0; }
+    });
     savedFilesCache = files;
     savedPage = 0;
     renderSavedPage();
@@ -1644,7 +1670,8 @@ function renderSavedPage(){
   const slice = files.slice(start, start + SAVED_PER_PAGE);
   wrap.innerHTML = '';
   slice.forEach(f=>{
-    const title = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
+    const base = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
+    const title = f._dispNum ? `${base}  (#${f._dispNum})` : base;
     const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
     const btn = el('button', { class:"finder", style:"flex:1;justify-content:flex-start", text: `${title}  ·  ${f.count} leads` });
     btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
