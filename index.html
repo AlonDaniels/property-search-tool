@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: steady autosave+retry, save-status, active-file highlight -->
+<!-- build: no-cache blobs, stable numbering, page-done button -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -1661,23 +1661,33 @@ async function openSavedFile(id){
 
 let savedFilesCache = [];
 let savedPage = 0;
+let pageDoneFlags = {};          // { [fileId]: true } — pages marked done
 const SAVED_PER_PAGE = 10;
+// Stable creation time from the id ("f" + base36 ms). Used for numbering so it
+// never changes when a file is re-saved.
+function fileCreatedMs(f){ const n = parseInt(String(f.id||'').replace(/^f/,''), 36); return Number.isFinite(n) ? n : 0; }
+async function loadPageDone(){
+  try{ const r = await fetch("/api/files?flags=1", { headers: authHeaders() }); if(r.ok) pageDoneFlags = (await r.json()) || {}; }catch(_){}
+}
+async function savePageDone(){
+  try{ await fetch("/api/files?flags=1", { method:"PUT", headers:{ ...authHeaders(), "Content-Type":"application/json" }, body: JSON.stringify(pageDoneFlags) }); }catch(e){ console.error("flags save failed", e); }
+}
 async function refreshSavedFiles(){
   const wrap = document.getElementById('savedFilesList');
   if(!wrap) return;
   wrap.innerHTML = '<div class="muted small">Loading…</div>';
   try{
-    const { files } = await apiFiles("GET", {});
+    const [res] = await Promise.all([ apiFiles("GET", {}), loadPageDone() ]);
+    const files = res.files;
     // Sort by the row dates (newest first), tie-break on start date.
     files.sort((a,b)=> (Number(b.dateMax)-Number(a.dateMax)) || (Number(b.dateMin)-Number(a.dateMin)));
-    // Number files that share the same date title (#1 = earliest uploaded) so
-    // duplicates are easy to tell apart.
+    // Number files that share the same date title (#1 = earliest created) using
+    // the STABLE id time, so numbers don't shuffle when a file is re-saved.
     const groups = {};
     files.forEach(f=>{ const t = dateRangeTitle(Number(f.dateMin), Number(f.dateMax)); (groups[t] = groups[t] || []).push(f); });
     Object.values(groups).forEach(g=>{
       if(g.length > 1){
-        g.slice().sort((a,b)=> String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')))
-          .forEach((f,i)=>{ f._dispNum = i+1; });
+        g.slice().sort((a,b)=> fileCreatedMs(a)-fileCreatedMs(b)).forEach((f,i)=>{ f._dispNum = i+1; });
       } else { g[0]._dispNum = 0; }
     });
     savedFilesCache = files;
@@ -1700,10 +1710,19 @@ function renderSavedPage(){
     const base = dateRangeTitle(Number(f.dateMin), Number(f.dateMax));
     const title = f._dispNum ? `${base}  (#${f._dispNum})` : base;
     const isActive = currentFile && f.id === currentFile.id;
-    const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:480px" });
-    const btnStyle = "flex:1;justify-content:flex-start" + (isActive ? ";background:#e0e7ff;border-color:#6366f1;color:#3730a3" : "");
+    const isDone = !!pageDoneFlags[f.id];
+    const row = el('div', { style:"display:flex;align-items:center;gap:6px;margin:3px 0;max-width:600px" });
+    let btnStyle = "flex:1;justify-content:flex-start";
+    if(isDone) btnStyle += ";background:#16a34a;border-color:#15803d;color:#fff";
+    else if(isActive) btnStyle += ";background:#e0e7ff;border-color:#6366f1;color:#3730a3";
     const btn = el('button', { class:"finder", style:btnStyle, text: (isActive ? "▶ " : "") + `${title}  ·  ${f.count} leads` + (isActive ? "   — open" : "") });
     btn.addEventListener('click', ()=> openSavedFile(f.id).catch(e=>{ ingestStatus.textContent = "Load failed: "+e.message; }));
+    const pdBtn = el('button', { class:"finder", style:"flex:0 0 auto" + (isDone ? ";background:#16a34a;border-color:#15803d;color:#fff" : ";color:#16a34a;border-color:#bbf7d0"), text: isDone ? "✓ Done" : "Done" });
+    pdBtn.addEventListener('click', ()=>{
+      if(pageDoneFlags[f.id]) delete pageDoneFlags[f.id]; else pageDoneFlags[f.id] = true;
+      renderSavedPage();
+      savePageDone();
+    });
     const delBtn = el('button', { class:"finder", style:"color:#dc2626;border-color:#fecaca;flex:0 0 auto", text:"Delete" });
     delBtn.addEventListener('click', ()=>{
       row.innerHTML = '';
@@ -1719,7 +1738,7 @@ function renderSavedPage(){
       no.addEventListener('click', ()=> renderSavedPage());
       row.appendChild(q); row.appendChild(yes); row.appendChild(no);
     });
-    row.appendChild(btn); row.appendChild(delBtn);
+    row.appendChild(btn); row.appendChild(pdBtn); row.appendChild(delBtn);
     wrap.appendChild(row);
   });
   if(pages > 1){
